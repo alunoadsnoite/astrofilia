@@ -169,30 +169,12 @@ func _play_cutscene() -> void:
 	await tw3.finished
 	await get_tree().create_timer(0.5).timeout
 
-	# Fase 3: missões
+	# Fase 3: preparar missões e ir para o gameplay
 	GameManager.build_mission_list()
 	mission_panel.visible = true
-	await _run_missions()
-	# Missão final
-	var final_text := GameManager.t("mission_final_mp") if not GameManager.singleplayer else GameManager.t("mission_final_sp")
-	mission_label.text = final_text
-	await get_tree().create_timer(3.0).timeout
-	# Transição
+	mission_label.text = "Pegue suas ferramentas e siga as missões!"
+	await get_tree().create_timer(2.5).timeout
+	# A nave apresenta falha e o jogador começa o capítulo 1
 	mission_label.text = "⚠ Sistema da nave falhando... ⚠"
 	await get_tree().create_timer(2.0).timeout
 	get_tree().change_scene_to_file("res://scenes/Gameplay.tscn")
-
-func _run_missions() -> void:
-	var list: Array[Dictionary] = []
-	for m in GameManager.mission_list:
-		list.append(m)
-
-	for m in list:
-		mission_label.text = GameManager.get_mission_text(m)
-		await get_tree().create_timer(mission_timer).timeout
-		GameManager.advance_mission()
-		if GameManager.missions_complete:
-			break
-	mission_panel.visible = false
-	await get_tree().create_timer(0.3).timeout
-	mission_panel.visible = true

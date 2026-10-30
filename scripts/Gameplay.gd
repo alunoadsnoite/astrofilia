@@ -14,8 +14,10 @@ extends Node3D
 @onready var gameover_panel: Panel = $CanvasLayer/GameOverPanel
 @onready var sun: DirectionalLight3D = $Sun
 @onready var touch_controls: Control = $CanvasLayer/TouchControls
-@onready var joystick_base: Panel = $CanvasLayer/TouchControls/JoystickBase
-@onready var joystick_stick: Panel = $CanvasLayer/TouchControls/JoystickBase/JoystickStick
+@onready var left_button: Button = $CanvasLayer/TouchControls/DPad/LeftButton
+@onready var right_button: Button = $CanvasLayer/TouchControls/DPad/RightButton
+@onready var up_button: Button = $CanvasLayer/TouchControls/DPad/UpButton
+@onready var down_button: Button = $CanvasLayer/TouchControls/DPad/DownButton
 @onready var jump_button: Button = $CanvasLayer/TouchControls/JumpButton
 @onready var interact_button: Button = $CanvasLayer/TouchControls/InteractButton
 @onready var pause_button: Button = $CanvasLayer/HUD/PauseButton
@@ -38,9 +40,7 @@ var weather: String = "clear"  # clear, rain, sandstorm, snow
 var weather_timer: float = 0.0
 
 # Touch
-var joystick_touch_index: int = -1
-var joystick_center: Vector2 = Vector2.ZERO
-var joystick_radius: float = 60.0
+var touch_dir: Vector2 = Vector2.ZERO
 
 var paused: bool = false
 var game_over: bool = false
@@ -52,6 +52,7 @@ func _ready() -> void:
 	_create_biomes()
 	_add_lighting()
 	_add_particles()
+	_create_lake()
 	_setup_touch()
 	_update_bars()
 	_update_inventory()
@@ -93,9 +94,9 @@ func _process(delta: float) -> void:
 		camera.global_position = camera.global_position.lerp(target, 0.1)
 		camera.look_at(player.global_position, Vector3.UP)
 	_update_mission()
-	# Touch joystick -> player
+	# Controles de toque -> jogador
 	if player:
-		player.external_move = _joystick_value()
+		player.external_move = touch_dir
 
 func _update_day_night() -> void:
 	# sun energy varies
@@ -128,7 +129,11 @@ func _update_mission() -> void:
 		else:
 			mission_label.text = ""
 	else:
-		mission_label.text = GameManager.get_mission_text(m)
+		var text: String = GameManager.get_mission_text(m)
+		var need: int = m.get("count", 1)
+		if need > 1:
+			text += "  (%d/%d)" % [GameManager.current_mission_progress, need]
+		mission_label.text = text
 
 func set_score(s: int) -> void:
 	score = s
@@ -147,17 +152,13 @@ func _update_inventory() -> void:
 	inventory_label.text = "\n".join(lines)
 
 func _spawn_items() -> void:
-	var positions := [
-		Vector3(5, 1, 0), Vector3(-4, 1, 3), Vector3(8, 1, -5),
-		Vector3(-7, 1, -2), Vector3(3, 1, 6), Vector3(-2, 1, -6),
-		Vector3(10, 1, 2), Vector3(-9, 1, 4), Vector3(0, 1, -10),
-		Vector3(12, 1, 8),
-	]
-	var types := ["mineral", "fruit", "plant", "crystal", "stone"]
-	var colors := [Color(0.6, 0.6, 0.7), Color(0.9, 0.3, 0.3), Color(0.2, 0.7, 0.3), Color(0.3, 0.8, 0.9), Color(0.7, 0.5, 0.2)]
-	for i in range(positions.size()):
+	var types := ["mineral", "fruit", "plant", "crystal", "stone", "animal"]
+	var colors := [Color(0.6, 0.6, 0.7), Color(0.9, 0.3, 0.3), Color(0.2, 0.7, 0.3), Color(0.3, 0.8, 0.9), Color(0.7, 0.5, 0.2), Color(1.0, 0.5, 0.1)]
+	for i in range(30):
 		var it := item_scene.instantiate()
-		it.position = positions[i]
+		var angle := i * TAU / 30.0
+		var radius := 6.0 + (i % 5) * 4.0
+		it.position = Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
 		var idx := i % types.size()
 		it.tipo_item = types[idx]
 		var mesh := it.get_node_or_null("MeshInstance3D")
@@ -174,12 +175,14 @@ func _spawn_items() -> void:
 func _on_item_collected(type: String) -> void:
 	inventory[type] = inventory.get(type, 0) + 1
 	_update_inventory()
-	# heal if fruit
 	if type == "fruit":
 		hunger = min(100, hunger + 15)
 		health = min(100, health + 5)
-	# popup
 	_show_popup("+1 %s" % type)
+	var completed := GameManager.register_action("collect", type)
+	_update_mission()
+	if completed:
+		_show_popup("✅ Missão concluída!")
 	_check_achievements()
 
 func _show_popup(text: String) -> void:
@@ -297,43 +300,97 @@ func _add_particles() -> void:
 	add_child(particles)
 
 # --- Touch controls ---
+var lake_position: Vector3 = Vector3(-18, 0.3, 8)
+
+func _create_lake() -> void:
+	var lake := MeshInstance3D.new()
+	var lm := CylinderMesh.new()
+	lm.top_radius = 5.0
+	lm.bottom_radius = 5.0
+	lm.height = 0.3
+	lake.mesh = lm
+	lake.position = lake_position
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.1, 0.45, 0.85)
+	mat.emission_enabled = true
+	mat.emission = Color(0.05, 0.25, 0.6)
+	mat.emission_energy_multiplier = 0.5
+	mat.metallic = 0.3
+	mat.roughness = 0.2
+	lake.material_override = mat
+	add_child(lake)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("interact"):
+		_on_interact_pressed()
+
+func _nearest_interactable() -> String:
+	if not player:
+		return ""
+	var best := ""
+	var best_dist := 6.0
+	# Lago
+	var d_lake := player.global_position.distance_to(lake_position)
+	if d_lake < best_dist:
+		best_dist = d_lake
+		best = "lake"
+	# Itens/animais
+	for it in items_node.get_children():
+		if not is_instance_valid(it):
+			continue
+		var t: String = it.get("tipo_item") if it.get("tipo_item") != null else ""
+		var d := player.global_position.distance_to(it.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = t
+	return best
+
+var touch_left := false
+var touch_right := false
+var touch_up := false
+var touch_down := false
+
 func _setup_touch() -> void:
-	joystick_base.gui_input.connect(_on_joystick_input)
-	jump_button.button_down.connect(func(): _on_jump_pressed())
-	interact_button.button_down.connect(func(): _on_interact_pressed())
+	left_button.button_down.connect(func(): touch_left = true; _refresh_touch_dir())
+	left_button.button_up.connect(func(): touch_left = false; _refresh_touch_dir())
+	right_button.button_down.connect(func(): touch_right = true; _refresh_touch_dir())
+	right_button.button_up.connect(func(): touch_right = false; _refresh_touch_dir())
+	up_button.button_down.connect(func(): touch_up = true; _refresh_touch_dir())
+	up_button.button_up.connect(func(): touch_up = false; _refresh_touch_dir())
+	down_button.button_down.connect(func(): touch_down = true; _refresh_touch_dir())
+	down_button.button_up.connect(func(): touch_down = false; _refresh_touch_dir())
 
-func _on_joystick_input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch:
-		if event.pressed:
-			joystick_touch_index = event.index
-			joystick_center = joystick_base.size / 2.0
-		else:
-			if event.index == joystick_touch_index:
-				joystick_touch_index = -1
-				joystick_stick.position = joystick_center - joystick_stick.size / 2.0
-				if player:
-					player.external_move = Vector2.ZERO
-	elif event is InputEventScreenDrag:
-		if event.index == joystick_touch_index:
-			var local: Vector2 = event.position - joystick_center
-			var dist := local.length()
-			if dist > joystick_radius:
-				local = local.normalized() * joystick_radius
-			joystick_stick.position = joystick_center + local - joystick_stick.size / 2.0
-
-func _joystick_value() -> Vector2:
-	if joystick_touch_index == -1:
-		return Vector2.ZERO
-	var stick_pos: Vector2 = joystick_stick.position + joystick_stick.size / 2.0 - joystick_center
-	return (stick_pos / joystick_radius).clamp(Vector2(-1, -1), Vector2(1, 1))
+func _refresh_touch_dir() -> void:
+	var x := (1.0 if touch_right else 0.0) - (1.0 if touch_left else 0.0)
+	var y := (1.0 if touch_down else 0.0) - (1.0 if touch_up else 0.0)
+	touch_dir = Vector2(x, y)
 
 func _on_jump_pressed() -> void:
 	if player and player.is_on_floor():
 		player.velocity.y = player.JUMP_VELOCITY
 
 func _on_interact_pressed() -> void:
-	# interagir com item próximo
-	pass
+	if paused or game_over:
+		return
+	var m := GameManager.get_current_mission()
+	if m.is_empty():
+		_show_popup("Missões concluídas!")
+		return
+	if m.get("action", "") == "report":
+		GameManager.advance_mission()
+		_update_mission()
+		_show_popup("📋 Relatório entregue!")
+		return
+	var target := _nearest_interactable()
+	if target == "":
+		_show_popup("Aproxime-se de um alvo para interagir")
+		return
+	var completed := GameManager.register_action("interact", target)
+	_update_mission()
+	if completed:
+		_show_popup("✅ Missão concluída!")
+	else:
+		_show_popup("📷 Analisando %s..." % target)
 
 # --- Pause / Game Over ---
 func _toggle_pause() -> void:
