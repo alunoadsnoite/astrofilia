@@ -4,9 +4,11 @@ Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e 
 
 **Versão do código: 0.2.0** — melhorias visuais, sobrevivência e salvamento completo.
 
-APK da versão anterior:
+APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.1.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.1.0)
+[![Release](https://img.shields.io/badge/release-v0.2.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.2.0)
+
+[⬇️ Baixar Astrofilia.apk (v0.2.0)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.2.0/Astrofilia.apk)
 
 ## 📖 História
 
