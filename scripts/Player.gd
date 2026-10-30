@@ -5,9 +5,11 @@ const JUMP_VELOCITY := 5.0
 const GRAVITY := 9.8
 
 var score: int = 0
+var suit_color: Color = Color("edf1e8")
 
 func _ready() -> void:
 	add_to_group("player")
+	suit_color = {"default": Color("edf1e8"), "blue": Color("438bd1"), "red": Color("d86b62"), "green": Color("64b38c")}.get(GameManager.appearance, Color("edf1e8"))
 	_build_model()
 
 func _build_model() -> void:
@@ -25,7 +27,7 @@ func _build_model() -> void:
 	body.mesh = bm
 	body.position = Vector3(0, 0.45, 0)
 	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.85, 0.85, 0.9)
+	body_mat.albedo_color = suit_color
 	body_mat.roughness = 0.4
 	body.material_override = body_mat
 	add_child(body)
@@ -38,7 +40,7 @@ func _build_model() -> void:
 	head.mesh = hm
 	head.position = Vector3(0, 1.1, 0)
 	var head_mat := StandardMaterial3D.new()
-	head_mat.albedo_color = Color(0.95, 0.8, 0.65)
+	head_mat.albedo_color = Color("f3a450")
 	head.material_override = head_mat
 	add_child(head)
 
@@ -68,7 +70,7 @@ func _build_model() -> void:
 	arm_r.position = Vector3(0.45, 0.75, 0)
 	arm_r.rotation_degrees = Vector3(0, 0, -30)
 	var arm_mat := StandardMaterial3D.new()
-	arm_mat.albedo_color = Color(0.85, 0.85, 0.9)
+	arm_mat.albedo_color = suit_color
 	arm_r.material_override = arm_mat
 	add_child(arm_r)
 
@@ -80,7 +82,7 @@ func _build_model() -> void:
 	hand_r.mesh = hand
 	hand_r.position = Vector3(0.7, 0.5, 0)
 	var hand_mat := StandardMaterial3D.new()
-	hand_mat.albedo_color = Color(0.95, 0.8, 0.65)
+	hand_mat.albedo_color = Color("f3a450")
 	hand_r.material_override = hand_mat
 	add_child(hand_r)
 
@@ -177,7 +179,7 @@ func _build_model() -> void:
 		leg.mesh = leg_mesh
 		leg.position = Vector3(x, -0.1, 0)
 		var leg_mat := StandardMaterial3D.new()
-		leg_mat.albedo_color = Color(0.7, 0.7, 0.75)
+		leg_mat.albedo_color = Color("314a60")
 		leg.material_override = leg_mat
 		add_child(leg)
 
@@ -192,7 +194,7 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = JUMP_VELOCITY
 
-	var input_dir := Input.get_vector("move_left", "move_right", "ui_up", "ui_down")
+	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	if external_move.length() > 0.1:
 		input_dir = external_move
 	var dir := Vector3(input_dir.x, 0, input_dir.y).normalized()

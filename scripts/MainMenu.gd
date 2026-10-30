@@ -23,10 +23,16 @@ extends Control
 @onready var achievements_back_button: Button = $AchievementsPanel/AchievementsVBox/AchievementsBackButton
 @onready var achievements_list: VBoxContainer = $AchievementsPanel/AchievementsVBox/AchievementsList
 
-var selected_slot_index: int = -1  # -1 = novo jogo
+var selected_slot_index: int = -1
+var choosing_new_slot := false
+var overwrite_dialog: ConfirmationDialog
 
 func _ready() -> void:
 	GameManager.load_game()
+	overwrite_dialog = ConfirmationDialog.new()
+	overwrite_dialog.title = "Substituir partida"
+	overwrite_dialog.confirmed.connect(func(): _start_game(true))
+	add_child(overwrite_dialog)
 	_refresh_texts()
 	_refresh_slots()
 	_setup_options()
@@ -74,6 +80,7 @@ func _refresh_slots() -> void:
 	for i in range(2):
 		if i < slots.size() and slots[i].size() > 0:
 			btns[i].text = "%s %d: %s" % [GameManager.t("save_slot"), i + 1, slots[i].get("name", "Jogo")]
+			btns[i].tooltip_text = "Continuar partida" if GameManager.has_snapshot(i) else "Partida antiga sem progresso: iniciar tutorial"
 		else:
 			btns[i].text = "%s %d (%s)" % [GameManager.t("save_slot"), i + 1, GameManager.t("empty_slot")]
 
@@ -92,7 +99,7 @@ func _setup_options() -> void:
 	appearance_option.clear()
 	for a in ["Padrão", "Traje Azul", "Traje Vermelho", "Traje Verde"]:
 		appearance_option.add_item(a)
-	appearance_option.selected = 0
+	appearance_option.selected = maxi(0, ["default", "blue", "red", "green"].find(GameManager.appearance))
 
 	# Modo
 	mode_option.clear()
@@ -110,6 +117,8 @@ func _setup_options() -> void:
 	music_slider.value = GameManager.music_volume
 
 func _on_play_pressed() -> void:
+	choosing_new_slot = false
+	$PlayPanel/PlayVBox/PlayTitle.text = GameManager.t("play")
 	play_panel.visible = true
 	options_panel.visible = false
 	achievements_panel.visible = false
@@ -147,43 +156,32 @@ func _refresh_achievements() -> void:
 			achievements_list.add_child(l)
 
 func _on_new_game_pressed() -> void:
-	selected_slot_index = -1
-	_start_game(true)
+	selected_slot_index = GameManager.first_empty_slot()
+	if selected_slot_index >= 0:
+		_start_game(true)
+	else:
+		choosing_new_slot = true
+		$PlayPanel/PlayVBox/PlayTitle.text = "Escolha o slot para o novo jogo"
 
 func _on_slot_pressed(idx: int) -> void:
-	if idx >= GameManager.saved_games.size() or GameManager.saved_games[idx].is_empty():
-		# slot vazio -> tratar como novo jogo
-		selected_slot_index = idx
-		_start_game(true)
-		return
 	selected_slot_index = idx
-	_start_game(false)
+	if choosing_new_slot and idx < GameManager.saved_games.size() and not GameManager.saved_games[idx].is_empty():
+		overwrite_dialog.dialog_text = "Substituir a partida de %s no slot %d?" % [GameManager.saved_games[idx].get("name", "Astronauta"), idx + 1]
+		overwrite_dialog.popup_centered()
+		return
+	if idx < GameManager.saved_games.size() and GameManager.saved_games[idx].has("snapshot") and not GameManager.has_snapshot(idx):
+		$PlayPanel/PlayVBox/PlayTitle.text = "Save incompatível. Escolha outro slot."
+		return
+	_start_game(not GameManager.has_snapshot(idx))
 
 func _start_game(is_new: bool) -> void:
 	if is_new:
-		# Criar/substituir slot
-		var slot := {"name": GameManager.player_name, "created": Time.get_unix_time_from_system()}
-		if selected_slot_index == -1:
-			if GameManager.saved_games.size() < 2:
-				GameManager.saved_games.append(slot)
-				selected_slot_index = GameManager.saved_games.size() - 1
-			else:
-				# substituir o primeiro
-				GameManager.saved_games[0] = slot
-				selected_slot_index = 0
-		else:
-			if selected_slot_index < GameManager.saved_games.size():
-				GameManager.saved_games[selected_slot_index] = slot
-			else:
-				# garantir tamanho
-				while GameManager.saved_games.size() <= selected_slot_index:
-					GameManager.saved_games.append({})
-				GameManager.saved_games[selected_slot_index] = slot
-	GameManager.save_game()
-	# Preparar missões
-	GameManager.build_mission_list()
-	# Ir para cutscene
-	get_tree().change_scene_to_file("res://scenes/Cutscene.tscn")
+		if GameManager.begin_new_game(selected_slot_index) != OK:
+			$PlayPanel/PlayVBox/PlayTitle.text = "Não foi possível salvar. Tente novamente."
+			return
+		get_tree().change_scene_to_file("res://scenes/Cutscene.tscn")
+	elif GameManager.prepare_continue(selected_slot_index):
+		get_tree().change_scene_to_file("res://scenes/Gameplay.tscn")
 
 func _on_username_changed(new_text: String) -> void:
 	GameManager.player_name = new_text

@@ -2,6 +2,10 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
+**Versão do código: 0.2.0** — melhorias visuais, sobrevivência e salvamento completo.
+
+APK da versão anterior:
+
 [![Release](https://img.shields.io/badge/release-v0.1.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.1.0)
 
 ## 📖 História
@@ -86,10 +90,47 @@ O APK de depuração é gerado em `build/Astrofilia.apk`.
 | Ação | Teclado | Touch |
 |------|---------|-------|
 | Mover | WASD / Setas | Joystick virtual |
-| Pular | Espaço / Seta ↑ | Botão ⬆ |
-| Interagir | E | Botão ✋ |
+| Pular | Espaço | Botão ⬆ |
+| Coletar / analisar / beber | E, próximo ao alvo | Botão ✋ |
 | Pausar | — | Botão ⏸ |
 
 ## 📄 Licença
 
 MIT — veja [LICENSE](LICENSE).
+
+## Ajustes de jogabilidade e visual
+
+- Iluminação diurna neutra e noite azulada, com paletas terracota, verde e gelo nos biomas.
+- Recursos com formatos próprios e marcos visuais para orientação.
+- A coleta é manual: aproxime-se e pressione **E / AÇÃO**. Nas missões do Biólogo, a ação analisa o alvo sem consumi-lo.
+- Recursos reaparecem após 12 segundos para permitir concluir missões mesmo após coletas antecipadas.
+- O lago turquesa recupera 40 pontos de hidratação por interação, inclusive após o tutorial.
+- Fome e sede diminuem mais lentamente; frutas recuperam fome ao serem coletadas.
+- Controles de toque aparecem em dispositivos com tela sensível ao toque.
+
+## Verificação automatizada
+
+```bash
+XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/astrofilia-tests.log --script tests/gameplay_smoke.gd
+```
+
+Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
+
+## Salvamento e aparência
+
+- Cada um dos dois slots guarda posição, vida, fome, hidratação, inventário, pontos e progresso parcial das missões.
+- Horário, clima, disposição da decoração e tempo de reaparecimento dos recursos são preservados.
+- **Continuar:** clique no slot salvo para voltar diretamente ao planeta, sem repetir a introdução.
+- Salvamento automático a cada 10 segundos, ao perder o foco e antes de sair; botão **Salvar partida** no menu de pausa.
+- O último estado com vida é mantido após uma morte. **Reiniciar** começa um novo tutorial no slot ativo.
+- **Novo jogo** usa um slot vazio. Com ambos ocupados, selecione um slot e confirme a substituição.
+- Slots antigos que só continham nome/data iniciam um novo tutorial.
+- As opções de traje branco, azul, vermelho e verde agora mudam o material do astronauta.
+
+Teste adicional de persistência, slots, fluxo do menu, trajes e missões por função:
+
+```bash
+XDG_DATA_HOME=/tmp/astrofilia-save-tests godot --headless --path . --log-file /tmp/astrofilia-save-tests.log --script tests/save_roundtrip.gd
+```
+
+O modo por função ainda é local; conexão multiplayer não está implementada.

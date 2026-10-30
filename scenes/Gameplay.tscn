@@ -1,4 +1,4 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/Gameplay.gd" id="1_script"]
 [ext_resource type="Environment" path="res://assets/environment.tres" id="2_env"]
@@ -67,7 +67,11 @@ grow_vertical = 2
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
-offset_bottom = 60.0
+offset_left = 245.0
+offset_top = 14.0
+offset_right = -215.0
+offset_bottom = 94.0
+autowrap_mode = 2
 grow_horizontal = 2
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 20
@@ -133,9 +137,9 @@ show_percentage = false
 layout_mode = 1
 anchors_preset = 0
 offset_left = 10.0
-offset_top = 130.0
-offset_right = 260.0
-offset_bottom = 260.0
+offset_top = 180.0
+offset_right = 215.0
+offset_bottom = 340.0
 theme_override_font_sizes/font_size = 14
 text = "Inventário:\n- mineral: 0\n- fruta: 0\n- planta: 0"
 autowrap_mode = 2
@@ -168,6 +172,7 @@ grow_vertical = 2
 alignment = 1
 
 [node name="PausePanel" type="Panel" parent="CanvasLayer"]
+process_mode = 3
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -203,12 +208,24 @@ custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "Continuar"
 
+[node name="SaveButton" type="Button" parent="CanvasLayer/PausePanel/PauseVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Salvar partida"
+
+[node name="SaveStatus" type="Label" parent="CanvasLayer/PausePanel/PauseVBox"]
+layout_mode = 2
+text = "Salvamento automático a cada 10s"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 14
+
 [node name="QuitButton" type="Button" parent="CanvasLayer/PausePanel/PauseVBox"]
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "Voltar ao menu"
 
 [node name="GameOverPanel" type="Panel" parent="CanvasLayer"]
+process_mode = 3
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -252,8 +269,9 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -300.0
-offset_top = -40.0
+offset_top = -64.0
 offset_right = 300.0
+autowrap_mode = 2
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_font_sizes/font_size = 16

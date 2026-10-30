@@ -5,6 +5,10 @@ signal mode_changed(singleplayer: bool)
 signal mission_changed(index: int, mission: Dictionary)
 
 const SAVE_PATH := "user://astrofilia_save.cfg"
+const SAVE_VERSION := 1
+
+var active_slot: int = -1
+var pending_snapshot: Dictionary = {}
 
 var player_name: String = "Astronauta"
 var language: String = "pt"
@@ -66,7 +70,7 @@ func set_mode(single: bool) -> void:
 	mode_changed.emit(single)
 	save_game()
 
-func save_game() -> void:
+func save_game() -> Error:
 	var cfg := ConfigFile.new()
 	cfg.set_value("player", "name", player_name)
 	cfg.set_value("player", "language", language)
@@ -77,7 +81,12 @@ func save_game() -> void:
 	cfg.set_value("player", "role", role)
 	cfg.set_value("player", "achievements", achievements)
 	cfg.set_value("saves", "games", saved_games)
-	cfg.save(SAVE_PATH)
+	# Write a complete temporary file before replacing the previous save.
+	var temporary_path := SAVE_PATH + ".tmp"
+	var error := cfg.save(temporary_path)
+	if error != OK:
+		return error
+	return DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary_path), ProjectSettings.globalize_path(SAVE_PATH))
 
 func load_game() -> void:
 	var cfg := ConfigFile.new()
@@ -176,7 +185,7 @@ func register_action(action: String, target: String) -> bool:
 		return false
 	var ma: String = m.get("action", "")
 	var mt: String = m.get("target", "")
-	if action == "report" or ma == "report":
+	if action == "report" and ma == "report":
 		# relatório final: qualquer interação conclui
 		advance_mission()
 		return true
@@ -203,3 +212,62 @@ func advance_mission() -> void:
 
 func mission_owner_allowed(owner: String) -> bool:
 	return true
+
+
+func first_empty_slot() -> int:
+	for index in range(2):
+		if index >= saved_games.size() or saved_games[index].is_empty():
+			return index
+	return -1
+
+func begin_new_game(index: int, reset_missions: bool = true) -> Error:
+	if index < 0 or index >= 2:
+		return ERR_INVALID_PARAMETER
+	var previous_games := saved_games.duplicate(true)
+	var previous_slot := active_slot
+	while saved_games.size() <= index:
+		saved_games.append({})
+	saved_games[index] = {"name": player_name, "created": Time.get_unix_time_from_system()}
+	active_slot = index
+	var error := save_game()
+	if error != OK:
+		saved_games.assign(previous_games)
+		active_slot = previous_slot
+		return error
+	pending_snapshot.clear()
+	if reset_missions:
+		build_mission_list()
+	return OK
+
+func has_snapshot(index: int) -> bool:
+	if index < 0 or index >= saved_games.size():
+		return false
+	var snapshot: Variant = saved_games[index].get("snapshot", {})
+	return snapshot is Dictionary and snapshot.get("version", 0) == SAVE_VERSION
+
+func prepare_continue(index: int) -> bool:
+	if not has_snapshot(index):
+		return false
+	var snapshot: Dictionary = saved_games[index]["snapshot"].duplicate(true)
+	singleplayer = snapshot.get("singleplayer", true)
+	role = snapshot.get("role", "collector")
+	player_name = saved_games[index].get("name", player_name)
+	build_mission_list()
+	current_mission_index = clampi(snapshot.get("mission_index", 0), 0, mission_list.size())
+	missions_complete = current_mission_index == mission_list.size()
+	var need: int = get_current_mission().get("count", 1)
+	current_mission_progress = clampi(snapshot.get("mission_progress", 0), 0, need - 1)
+	active_slot = index
+	pending_snapshot = snapshot
+	return true
+
+func store_snapshot(snapshot: Dictionary) -> Error:
+	if active_slot < 0 or active_slot >= saved_games.size():
+		return ERR_DOES_NOT_EXIST
+	var previous: Dictionary = saved_games[active_slot].duplicate(true)
+	saved_games[active_slot]["snapshot"] = snapshot.duplicate(true)
+	saved_games[active_slot]["updated"] = Time.get_unix_time_from_system()
+	var error := save_game()
+	if error != OK:
+		saved_games[active_slot] = previous
+	return error

@@ -33,7 +33,7 @@ var inventory: Dictionary = {"mineral": 0, "fruit": 0, "plant": 0, "crystal": 0,
 
 # Time of day
 var time_of_day: float = 0.3  # 0..1
-var day_speed: float = 0.02
+var day_speed: float = 0.002
 
 # Weather
 var weather: String = "clear"  # clear, rain, sandstorm, snow
@@ -44,16 +44,29 @@ var touch_dir: Vector2 = Vector2.ZERO
 
 var paused: bool = false
 var game_over: bool = false
+var world_seed: int = 0
+var scenery_rng := RandomNumberGenerator.new()
+var save_error_shown := false
 
 func _ready() -> void:
 	add_to_group("hud")
+	if GameManager.mission_list.is_empty():
+		GameManager.build_mission_list()
+	world_seed = GameManager.pending_snapshot.get("world_seed", randi())
+	scenery_rng.seed = world_seed
+	_setup_visuals()
 	_spawn_items()
 	_update_mission()
 	_create_biomes()
 	_add_lighting()
 	_add_particles()
 	_create_lake()
+	_create_landmarks()
 	_setup_touch()
+	_restore_snapshot(GameManager.pending_snapshot)
+	GameManager.pending_snapshot.clear()
+	_update_day_night()
+	_update_mission()
 	_update_bars()
 	_update_inventory()
 	# Auto-save timer
@@ -63,12 +76,16 @@ func _ready() -> void:
 	timer.timeout.connect(_autosave)
 	add_child(timer)
 	# Buttons
+	$CanvasLayer/PausePanel/PauseVBox/SaveButton.pressed.connect(_manual_save)
 	pause_button.pressed.connect(_toggle_pause)
 	$CanvasLayer/PausePanel/PauseVBox/ResumeButton.pressed.connect(_toggle_pause)
 	$CanvasLayer/PausePanel/PauseVBox/QuitButton.pressed.connect(_quit_to_menu)
 	$CanvasLayer/GameOverPanel/GameOverVBox/RestartButton.pressed.connect(_restart)
 	jump_button.pressed.connect(_on_jump_pressed)
 	interact_button.pressed.connect(_on_interact_pressed)
+	get_tree().auto_accept_quit = false
+	if GameManager.active_slot >= 0:
+		_autosave()
 
 func _process(delta: float) -> void:
 	if paused or game_over:
@@ -77,8 +94,8 @@ func _process(delta: float) -> void:
 	time_of_day = fmod(time_of_day + day_speed * delta, 1.0)
 	_update_day_night()
 	# Stats decay
-	hunger = max(0, hunger - 1.5 * delta)
-	thirst = max(0, thirst - 2.0 * delta)
+	hunger = max(0, hunger - 0.22 * delta)
+	thirst = max(0, thirst - 0.35 * delta)
 	if hunger <= 0 or thirst <= 0:
 		health = max(0, health - 5.0 * delta)
 	_update_bars()
@@ -91,22 +108,25 @@ func _process(delta: float) -> void:
 	# Camera follow
 	if player:
 		var target := player.global_position + Vector3(0, 12, 14)
-		camera.global_position = camera.global_position.lerp(target, 0.1)
+		camera.global_position = camera.global_position.lerp(target, 1.0 - exp(-8.0 * delta))
 		camera.look_at(player.global_position, Vector3.UP)
 	_update_mission()
+	_update_hint()
 	# Controles de toque -> jogador
 	if player:
 		player.external_move = touch_dir
 
 func _update_day_night() -> void:
-	# sun energy varies
-	var t := time_of_day
-	var sun_energy: float = 0.3 + 0.9 * (1.0 - abs(t - 0.5) * 2.0)
-	sun.light_energy = clamp(sun_energy, 0.2, 1.2)
-	# ambient via environment
-	var env := get_viewport().world_3d.environment if get_viewport() else null
-	if env:
-		env.ambient_light_energy = 0.3 + 0.4 * sun_energy
+	var daylight := clampf(-cos(time_of_day * TAU), 0.0, 1.0)
+	sun.light_energy = lerpf(0.25, 1.2, daylight)
+	sun.light_color = Color("b9c9ff").lerp(Color("fff0d5"), daylight)
+	var env: Environment = $WorldEnvironment.environment
+	env.ambient_light_energy = lerpf(0.35, 0.7, daylight)
+	env.ambient_light_color = Color("818bb5").lerp(Color("dbe9f0"), daylight)
+	env.fog_light_color = Color("373653").lerp(Color("a1c5cc"), daylight)
+	var sky_material := env.sky.sky_material as ProceduralSkyMaterial
+	sky_material.sky_top_color = Color("171d40").lerp(Color("24749c"), daylight)
+	sky_material.sky_horizon_color = Color("635075").lerp(Color("b4d8d9"), daylight)
 
 func _change_weather() -> void:
 	weather_timer = randf_range(15.0, 30.0)
@@ -153,7 +173,6 @@ func _update_inventory() -> void:
 
 func _spawn_items() -> void:
 	var types := ["mineral", "fruit", "plant", "crystal", "stone", "animal"]
-	var colors := [Color(0.6, 0.6, 0.7), Color(0.9, 0.3, 0.3), Color(0.2, 0.7, 0.3), Color(0.3, 0.8, 0.9), Color(0.7, 0.5, 0.2), Color(1.0, 0.5, 0.1)]
 	for i in range(30):
 		var it := item_scene.instantiate()
 		var angle := i * TAU / 30.0
@@ -161,15 +180,7 @@ func _spawn_items() -> void:
 		it.position = Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
 		var idx := i % types.size()
 		it.tipo_item = types[idx]
-		var mesh := it.get_node_or_null("MeshInstance3D")
-		if mesh:
-			var mat := StandardMaterial3D.new()
-			mat.albedo_color = colors[idx]
-			mat.emission_enabled = true
-			mat.emission = colors[idx] * 0.4
-			mat.emission_energy_multiplier = 0.6
-			mesh.material_override = mat
-		it.collected.connect(_on_item_collected.bind(types[idx]))
+		it.collected.connect(_on_item_collected)
 		items_node.add_child(it)
 
 func _on_item_collected(type: String) -> void:
@@ -199,20 +210,20 @@ func _show_popup(text: String) -> void:
 
 func _create_biomes() -> void:
 	var biomes := [
-		{"pos": Vector3(-18, -0.5, -18), "color": Color(0.75, 0.55, 0.25), "name": "Deserto", "accent": Color(0.9, 0.7, 0.3), "prop": "rock"},
-		{"pos": Vector3(18, -0.5, 0), "color": Color(0.12, 0.5, 0.18), "name": "Floresta", "accent": Color(0.2, 0.8, 0.3), "prop": "tree"},
-		{"pos": Vector3(0, -0.5, 18), "color": Color(0.85, 0.9, 0.98), "name": "Nevado", "accent": Color(0.5, 0.7, 1.0), "prop": "snow"},
+		{"pos": Vector3(-18, -0.5, -18), "color": Color("ce9758"), "name": "Deserto", "accent": Color(0.9, 0.7, 0.3), "prop": "rock"},
+		{"pos": Vector3(18, -0.5, 0), "color": Color("286f64"), "name": "Floresta", "accent": Color(0.2, 0.8, 0.3), "prop": "tree"},
+		{"pos": Vector3(0, -0.5, 18), "color": Color("dcecf0"), "name": "Nevado", "accent": Color(0.5, 0.7, 1.0), "prop": "snow"},
 	]
 	for b in biomes:
 		for gx in range(-1, 2):
 			for gz in range(-1, 2):
 				var mb := MeshInstance3D.new()
 				var bm := BoxMesh.new()
-				var h := randf_range(0.6, 1.4)
+				var h := 1.0
 				bm.size = Vector3(9, h, 9)
 				mb.mesh = bm
 				var mat := StandardMaterial3D.new()
-				mat.albedo_color = b["color"].darkened(randf_range(0.0, 0.15))
+				mat.albedo_color = b["color"].darkened(scenery_rng.randf_range(0.0, 0.15))
 				mat.roughness = 0.8
 				mb.material_override = mat
 				mb.position = b["pos"] + Vector3(gx * 9, (h - 1.0) * 0.5, gz * 9)
@@ -227,15 +238,15 @@ func _create_biomes() -> void:
 		add_child(sb)
 		for j in range(10):
 			var prop := MeshInstance3D.new()
-			var off := Vector3(randf_range(-11, 11), 0, randf_range(-11, 11))
+			var off := Vector3(scenery_rng.randf_range(-11, 11), 0.5, scenery_rng.randf_range(-11, 11))
 			if b["prop"] == "rock":
 				var rm := SphereMesh.new()
-				rm.radius = randf_range(0.4, 1.2)
+				rm.radius = scenery_rng.randf_range(0.4, 1.2)
 				rm.height = rm.radius * 1.4
 				prop.mesh = rm
 				prop.position = b["pos"] + off + Vector3(0, rm.radius * 0.7, 0)
 				var pmat := StandardMaterial3D.new()
-				pmat.albedo_color = Color(0.5, 0.45, 0.4)
+				pmat.albedo_color = Color("ac654d")
 				pmat.roughness = 0.9
 				prop.material_override = pmat
 			elif b["prop"] == "tree":
@@ -257,16 +268,17 @@ func _create_biomes() -> void:
 				crown.mesh = cm
 				crown.position = b["pos"] + off + Vector3(0, 3.2, 0)
 				var cmat := StandardMaterial3D.new()
-				cmat.albedo_color = Color(0.1, 0.6, 0.2)
+				cmat.albedo_color = Color("54b995")
 				cmat.emission_enabled = true
 				cmat.emission = Color(0.05, 0.3, 0.1)
 				cmat.emission_energy_multiplier = 0.3
 				crown.material_override = cmat
 				add_child(crown)
+				prop.free()
 				continue
 			else:
 				var sm := SphereMesh.new()
-				sm.radius = randf_range(0.5, 1.0)
+				sm.radius = scenery_rng.randf_range(0.5, 1.0)
 				sm.height = sm.radius * 1.2
 				prop.mesh = sm
 				prop.position = b["pos"] + off + Vector3(0, sm.radius * 0.6, 0)
@@ -278,8 +290,8 @@ func _create_biomes() -> void:
 
 func _add_lighting() -> void:
 	var omni := OmniLight3D.new()
-	omni.light_color = Color(0.6, 0.4, 1.0)
-	omni.light_energy = 1.5
+	omni.light_color = Color("d4eced")
+	omni.light_energy = 0.35
 	omni.omni_range = 30.0
 	omni.position = Vector3(0, 8, 0)
 	add_child(omni)
@@ -311,7 +323,7 @@ func _create_lake() -> void:
 	lake.mesh = lm
 	lake.position = lake_position
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.1, 0.45, 0.85)
+	mat.albedo_color = Color("28b9bf")
 	mat.emission_enabled = true
 	mat.emission = Color(0.05, 0.25, 0.6)
 	mat.emission_energy_multiplier = 0.5
@@ -324,26 +336,37 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact"):
 		_on_interact_pressed()
 
-func _nearest_interactable() -> String:
-	if not player:
-		return ""
-	var best := ""
-	var best_dist := 6.0
-	# Lago
-	var d_lake := player.global_position.distance_to(lake_position)
-	if d_lake < best_dist:
-		best_dist = d_lake
-		best = "lake"
-	# Itens/animais
+func _nearest_item() -> Node3D:
+	var nearest: Node3D = null
+	var distance := 3.0
 	for it in items_node.get_children():
-		if not is_instance_valid(it):
+		if not it.available:
 			continue
-		var t: String = it.get("tipo_item") if it.get("tipo_item") != null else ""
-		var d := player.global_position.distance_to(it.global_position)
-		if d < best_dist:
-			best_dist = d
-			best = t
-	return best
+		var d: float = player.global_position.distance_to(it.global_position)
+		if d < distance:
+			distance = d
+			nearest = it
+	return nearest
+
+func _near_lake() -> bool:
+	var offset := player.global_position - lake_position
+	return Vector2(offset.x, offset.z).length() <= 6.5
+
+func _should_use_lake(mission: Dictionary, item: Node3D) -> bool:
+	return _near_lake() and (item == null or mission.get("target", "") == "lake" or (thirst < 100.0 and mission.get("action", "") != "interact"))
+
+func _update_hint() -> void:
+	var item := _nearest_item()
+	var mission := GameManager.get_current_mission()
+	var hint := "Explore os biomas • Encontre recursos e o lago turquesa"
+	if _should_use_lake(mission, item):
+		hint = "E / AÇÃO • Beber água / analisar o lago"
+	elif item:
+		var verb := "Analisar" if mission.get("action", "") == "interact" else "Coletar"
+		hint = "E / AÇÃO • %s %s" % [verb, item.display_name()]
+	elif _near_lake():
+		hint = "E / AÇÃO • Beber água / analisar o lago"
+	$CanvasLayer/HUD/HintLabel.text = hint
 
 var touch_left := false
 var touch_right := false
@@ -373,32 +396,42 @@ func _on_interact_pressed() -> void:
 	if paused or game_over:
 		return
 	var m := GameManager.get_current_mission()
-	if m.is_empty():
-		_show_popup("Missões concluídas!")
-		return
 	if m.get("action", "") == "report":
 		GameManager.advance_mission()
 		_update_mission()
-		_show_popup("📋 Relatório entregue!")
+		_show_popup("Relatório entregue!")
 		return
-	var target := _nearest_interactable()
-	if target == "":
-		_show_popup("Aproxime-se de um alvo para interagir")
-		return
-	var completed := GameManager.register_action("interact", target)
-	_update_mission()
-	if completed:
-		_show_popup("✅ Missão concluída!")
+	var item := _nearest_item()
+	var target := ""
+	if item and not _should_use_lake(m, item):
+		target = item.tipo_item
+	elif _near_lake():
+		target = "lake"
+		thirst = minf(100.0, thirst + 40.0)
+		_update_bars()
+		_show_popup("Água potável • +40 hidratação")
 	else:
-		_show_popup("📷 Analisando %s..." % target)
+		_show_popup("Aproxime-se de um recurso ou do lago")
+		return
+	if m.get("action", "") == "interact":
+		var completed := GameManager.register_action("interact", target)
+		_show_popup("Missão concluída!" if completed else "Análise registrada • " + target)
+	elif item and target != "lake":
+		item.collect(player)
+	_update_mission()
 
 # --- Pause / Game Over ---
 func _toggle_pause() -> void:
 	paused = not paused
 	pause_panel.visible = paused
 	get_tree().paused = paused
+	if paused:
+		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Salvamento automático a cada 10s"
 
 func _quit_to_menu() -> void:
+	if not game_over and _save_progress() != OK:
+		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Falha ao salvar. Tente novamente."
+		return
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
 
@@ -410,6 +443,8 @@ func _trigger_game_over() -> void:
 	get_tree().paused = true
 
 func _restart() -> void:
+	GameManager.pending_snapshot.clear()
+	GameManager.build_mission_list()
 	get_tree().paused = false
 	get_tree().reload_current_scene()
 
@@ -423,6 +458,162 @@ func _check_achievements() -> void:
 		GameManager.add_achievement("3 frutas")
 
 # --- Auto-save ---
+func _snapshot() -> Dictionary:
+	var cooldowns: Array[float] = []
+	for item in items_node.get_children():
+		cooldowns.append(item.respawn_timer.time_left)
+	return {
+		"version": GameManager.SAVE_VERSION,
+		"position": player.global_position, "health": health,
+		"hunger": hunger, "thirst": thirst, "score": score,
+		"inventory": inventory.duplicate(true), "time_of_day": time_of_day,
+		"weather": weather, "weather_timer": weather_timer,
+		"world_seed": world_seed, "resource_cooldowns": cooldowns,
+		"singleplayer": GameManager.singleplayer, "role": GameManager.role,
+		"mission_index": GameManager.current_mission_index,
+		"mission_progress": GameManager.current_mission_progress,
+	}
+
+func _restore_snapshot(snapshot: Dictionary) -> void:
+	if snapshot.is_empty():
+		return
+	player.global_position = snapshot.get("position", Vector3(0, 1, 0))
+	player.velocity = Vector3.ZERO
+	camera.global_position = player.global_position + Vector3(0, 12, 14)
+	camera.look_at(player.global_position, Vector3.UP)
+	health = clampf(snapshot.get("health", 100.0), 1.0, 100.0)
+	hunger = clampf(snapshot.get("hunger", 100.0), 0.0, 100.0)
+	thirst = clampf(snapshot.get("thirst", 100.0), 0.0, 100.0)
+	score = maxi(0, snapshot.get("score", 0))
+	player.score = score
+	score_label.text = "Pontos: %d" % score
+	var saved_inventory: Dictionary = snapshot.get("inventory", {})
+	for type in ["mineral", "fruit", "plant", "crystal", "stone", "animal"]:
+		inventory[type] = maxi(0, saved_inventory.get(type, 0))
+	time_of_day = clampf(snapshot.get("time_of_day", 0.3), 0.0, 1.0)
+	weather = snapshot.get("weather", "clear")
+	weather_timer = maxf(0.0, snapshot.get("weather_timer", 0.0))
+	var cooldowns: Array = snapshot.get("resource_cooldowns", [])
+	for i in range(mini(cooldowns.size(), items_node.get_child_count())):
+		items_node.get_child(i).restore_cooldown(cooldowns[i])
+
+func _save_progress() -> Error:
+	if game_over or health <= 0:
+		return OK # Preserve the last living checkpoint.
+	if GameManager.active_slot < 0:
+		var index := GameManager.first_empty_slot()
+		if index < 0:
+			return ERR_ALREADY_IN_USE
+		var error := GameManager.begin_new_game(index, false)
+		if error != OK:
+			return error
+	return GameManager.store_snapshot(_snapshot())
+
 func _autosave() -> void:
-	GameManager.saved_games = GameManager.saved_games
-	GameManager.save_game()
+	var error := _save_progress()
+	if error != OK and not save_error_shown:
+		_show_popup("Não foi possível salvar a partida")
+	save_error_shown = error != OK
+
+func _manual_save() -> void:
+	var error := _save_progress()
+	$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Partida salva" if error == OK else "Falha ao salvar. Tente novamente."
+
+func _notification(what: int) -> void:
+	if not is_node_ready():
+		return
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_autosave()
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if _save_progress() == OK:
+			get_tree().quit()
+		else:
+			_show_popup("Falha ao salvar. Salve no menu de pausa antes de sair.")
+
+func _setup_visuals() -> void:
+	# Duplicate the resource so the menu/cutscene keep their own environment.
+	$WorldEnvironment.environment = $WorldEnvironment.environment.duplicate(true)
+	var ground_material := StandardMaterial3D.new()
+	ground_material.albedo_color = Color("637b77")
+	ground_material.roughness = 0.95
+	$Ground/Mesh.material_override = ground_material
+	touch_controls.visible = DisplayServer.is_touchscreen_available()
+	var bar_colors := [Color("f0787e"), Color("efb85c"), Color("55c9dc")]
+	var bars := [health_bar, hunger_bar, thirst_bar]
+	for i in range(bars.size()):
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = bar_colors[i]
+		fill.set_corner_radius_all(5)
+		bars[i].add_theme_stylebox_override("fill", fill)
+		var background := StyleBoxFlat.new()
+		background.bg_color = Color("172c3b")
+		background.set_corner_radius_all(5)
+		bars[i].add_theme_stylebox_override("background", background)
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = Color(0.035, 0.08, 0.13, 0.9)
+	panel.set_corner_radius_all(12)
+	panel.content_margin_left = 16
+	panel.content_margin_right = 16
+	panel.content_margin_top = 10
+	panel.content_margin_bottom = 10
+	mission_label.add_theme_stylebox_override("normal", panel)
+	mission_label.add_theme_color_override("font_color", Color("f2dc99"))
+	inventory_label.add_theme_stylebox_override("normal", panel)
+	$CanvasLayer/HUD/HintLabel.add_theme_stylebox_override("normal", panel)
+	_update_day_night()
+
+
+func _scenery(shape: Mesh, color: Color, pos: Vector3, size: Vector3 = Vector3.ONE) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = shape
+	mesh.position = pos
+	mesh.scale = size
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.85
+	mesh.material_override = material
+	add_child(mesh)
+	return mesh
+
+func _create_landmarks() -> void:
+	# Warm desert spires, a broad forest canopy, and ice needles aid navigation.
+	for i in range(3):
+		var spire := CylinderMesh.new()
+		spire.top_radius = 0.5
+		spire.bottom_radius = 1.4
+		spire.height = 5.0 + i
+		spire.radial_segments = 6
+		_scenery(spire, Color("b96c50"), Vector3(-22 + i * 2.0, spire.height / 2.0, -22))
+	var trunk := CylinderMesh.new()
+	trunk.top_radius = 0.35
+	trunk.bottom_radius = 0.65
+	trunk.height = 5.0
+	_scenery(trunk, Color("6d5761"), Vector3(23, 2.5, -7))
+	for i in range(3):
+		var canopy := SphereMesh.new()
+		canopy.radius = 2.7 - i * 0.45
+		canopy.height = 2.0
+		_scenery(canopy, Color("75c4ab").lightened(i * 0.08), Vector3(23, 4.5 + i, -7))
+	for i in range(4):
+		var ice := CylinderMesh.new()
+		ice.top_radius = 0
+		ice.bottom_radius = 0.7
+		ice.height = 2.0 + i * 0.65
+		ice.radial_segments = 5
+		_scenery(ice, Color("8abed5"), Vector3(-6 + i * 1.1, ice.height / 2.0, 24))
+	for i in range(36):
+		var flower := SphereMesh.new()
+		flower.radius = 0.14
+		flower.height = 0.25
+		_scenery(flower, Color("ff9988") if i % 2 == 0 else Color("f5ce78"), Vector3(scenery_rng.randf_range(6, 29), 0.16, scenery_rng.randf_range(-11, 11)))
+	var label := Label3D.new()
+	label.text = "LAGO • ÁGUA POTÁVEL"
+	label.position = lake_position + Vector3(0, 1.5, 0)
+	label.font_size = 40
+	label.modulate = Color("b4fff1")
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	add_child(label)
+
+
+func _exit_tree() -> void:
+	get_tree().auto_accept_quit = true
