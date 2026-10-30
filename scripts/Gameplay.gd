@@ -46,8 +46,8 @@ var touch_fingers: Dictionary = {}
 var paused: bool = false
 var game_over: bool = false
 var world_seed: int = 0
-var scenery_rng := RandomNumberGenerator.new()
-var save_error_shown := false
+var scenery_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var save_error_shown: bool = false
 
 func _ready() -> void:
 	add_to_group("hud")
@@ -143,7 +143,7 @@ func _change_weather() -> void:
 	# Could change particle color; skip heavy for now
 
 func _update_mission() -> void:
-	var m := GameManager.get_current_mission()
+	var m: Dictionary = GameManager.get_current_mission()
 	if m.is_empty():
 		if GameManager.missions_complete:
 			mission_label.text = GameManager.t("mission_final_sp") if GameManager.singleplayer else GameManager.t("mission_final_mp")
@@ -175,7 +175,7 @@ func _update_inventory() -> void:
 func _spawn_items() -> void:
 	var types := ["mineral", "fruit", "plant", "crystal", "stone", "animal"]
 	for i in range(30):
-		var it := item_scene.instantiate()
+		var it: Node3D = item_scene.instantiate()
 		var angle := i * TAU / 30.0
 		var radius := 6.0 + (i % 5) * 4.0
 		var pos := Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
@@ -196,7 +196,7 @@ func _on_item_collected(type: String) -> void:
 		hunger = min(100, hunger + 15)
 		health = min(100, health + 5)
 	_show_popup("+1 %s" % type)
-	var completed := GameManager.register_action("collect", type)
+	var completed: bool = GameManager.register_action("collect", type)
 	_update_mission()
 	if completed:
 		_show_popup("✅ Missão concluída!")
@@ -407,13 +407,13 @@ func _should_use_lake(mission: Dictionary, item: Node3D) -> bool:
 	return _near_lake() and (item == null or mission.get("target", "") == "lake" or (thirst < 100.0 and mission.get("action", "") != "interact"))
 
 func _update_hint() -> void:
-	var item := _nearest_item()
-	var mission := GameManager.get_current_mission()
+	var item: Node3D = _nearest_item()
+	var mission: Dictionary = GameManager.get_current_mission()
 	var hint := "Explore os biomas • Encontre recursos e o lago turquesa"
 	if _should_use_lake(mission, item):
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif item:
-		var verb := "Analisar" if mission.get("action", "") == "interact" else "Coletar"
+		var verb: String = "Analisar" if mission.get("action", "") == "interact" else "Coletar"
 		hint = "E / AÇÃO • %s %s" % [verb, item.display_name()]
 	elif _near_lake():
 		hint = "E / AÇÃO • Beber água / analisar o lago"
@@ -502,13 +502,13 @@ func _on_jump_pressed() -> void:
 func _on_interact_pressed() -> void:
 	if paused or game_over:
 		return
-	var m := GameManager.get_current_mission()
+	var m: Dictionary = GameManager.get_current_mission()
 	if m.get("action", "") == "report":
 		GameManager.advance_mission()
 		_update_mission()
 		_show_popup("Relatório entregue!")
 		return
-	var item := _nearest_item()
+	var item: Node3D = _nearest_item()
 	var target := ""
 	if item and not _should_use_lake(m, item):
 		target = item.tipo_item
@@ -521,11 +521,14 @@ func _on_interact_pressed() -> void:
 		_show_popup("Aproxime-se de um recurso ou do lago")
 		return
 	if m.get("action", "") == "interact":
-		var completed := GameManager.register_action("interact", target)
+		var completed: bool = GameManager.register_action("interact", target)
 		_show_popup("Missão concluída!" if completed else "Análise registrada • " + target)
+		GameManager.advance_mission()
+		_update_mission()
 	elif item and target != "lake":
 		item.collect(player)
-	_update_mission()
+		GameManager.advance_mission()
+		_update_mission()
 
 # --- Pause / Game Over ---
 func _toggle_pause() -> void:
@@ -610,10 +613,10 @@ func _save_progress() -> Error:
 	if game_over or health <= 0:
 		return OK # Preserve the last living checkpoint.
 	if GameManager.active_slot < 0:
-		var index := GameManager.first_empty_slot()
+		var index: int = GameManager.first_empty_slot()
 		if index < 0:
 			return ERR_ALREADY_IN_USE
-		var error := GameManager.begin_new_game(index, false)
+		var error: Error = GameManager.begin_new_game(index, false)
 		if error != OK:
 			return error
 	return GameManager.store_snapshot(_snapshot())

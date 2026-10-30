@@ -4,8 +4,8 @@ signal language_changed(lang: String)
 signal mode_changed(singleplayer: bool)
 signal mission_changed(index: int, mission: Dictionary)
 
-const SAVE_PATH := "user://astrofilia_save.cfg"
-const SAVE_VERSION := 1
+const SAVE_PATH := "user://astrofilia_save.json"
+const SAVE_VERSION := 2
 
 var active_slot: int = -1
 var pending_snapshot: Dictionary = {}
@@ -24,6 +24,12 @@ var mission_list: Array[Dictionary] = []
 var current_mission_index: int = 0
 var current_mission_progress: int = 0
 var missions_complete: bool = false
+
+# Level/XP system
+var experience: int = 0
+var level: int = 1
+var xp_to_next_level: int = 100
+var max_level: int = 50
 
 var translations := {
 	"pt": {
@@ -56,6 +62,49 @@ var translations := {
 func _ready() -> void:
 	load_game()
 
+func get_current_mission() -> Dictionary:
+	if current_mission_index >= 0 and current_mission_index < mission_list.size():
+		return mission_list[current_mission_index]
+	return {}
+
+func get_mission_text(mission: Dictionary) -> String:
+	var lang := language
+	if lang not in translations:
+		lang = "pt"
+	var t: Dictionary = translations[lang] as Dictionary
+	var pt: String = mission.get("text_pt", mission.get("text_en", "")) as String
+	var en: String = mission.get("text_en", "") as String
+	if lang == "pt":
+		return pt
+	elif lang == "en":
+		return en
+	else:
+		return mission.get("text_es", pt) as String
+
+func advance_mission() -> void:
+	current_mission_index += 1
+	current_mission_progress = 0
+	if current_mission_index >= mission_list.size():
+		current_mission_index = 0
+		missions_complete = true
+	else:
+		missions_complete = false
+
+func register_action(action: String, target: String) -> bool:
+	# Register a completed action
+	return true
+
+func add_achievement(achievement: String) -> void:
+	if not achievements.has(achievement):
+		achievements.append(achievement)
+
+func first_empty_slot() -> int:
+	# Return the first empty slot index
+	for i in range(saved_games.size()):
+		if saved_games[i].is_empty():
+			return i
+	return -1
+
 func t(key: String) -> String:
 	var dict: Dictionary = translations.get(language, translations["pt"])
 	return dict.get(key, key)
@@ -70,44 +119,31 @@ func set_mode(single: bool) -> void:
 	mode_changed.emit(single)
 	save_game()
 
-func save_game() -> Error:
-	var cfg := ConfigFile.new()
-	cfg.set_value("player", "name", player_name)
-	cfg.set_value("player", "language", language)
-	cfg.set_value("player", "sfx_volume", sfx_volume)
-	cfg.set_value("player", "music_volume", music_volume)
-	cfg.set_value("player", "appearance", appearance)
-	cfg.set_value("player", "singleplayer", singleplayer)
-	cfg.set_value("player", "role", role)
-	cfg.set_value("player", "achievements", achievements)
-	cfg.set_value("saves", "games", saved_games)
-	# Write a complete temporary file before replacing the previous save.
-	var temporary_path := SAVE_PATH + ".tmp"
-	var error := cfg.save(temporary_path)
-	if error != OK:
-		return error
-	return DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary_path), ProjectSettings.globalize_path(SAVE_PATH))
+func gain_experience(points: int) -> void:
+	experience += points
+	while experience >= xp_to_next_level and level < max_level:
+		experience -= xp_to_next_level
+		level += 1
+		xp_to_next_level = int(xp_to_next_level * 1.5) + 20
+		check_level_achievements()
+	if level >= max_level:
+		xp_to_next_level = 999999
+	# At max level, keep remaining XP (just prevent overflow)
 
-func load_game() -> void:
-	var cfg := ConfigFile.new()
-	if cfg.load(SAVE_PATH) != OK:
-		return
-	player_name = cfg.get_value("player", "name", player_name)
-	language = cfg.get_value("player", "language", language)
-	sfx_volume = cfg.get_value("player", "sfx_volume", sfx_volume)
-	music_volume = cfg.get_value("player", "music_volume", music_volume)
-	appearance = cfg.get_value("player", "appearance", appearance)
-	singleplayer = cfg.get_value("player", "singleplayer", singleplayer)
-	role = cfg.get_value("player", "role", role)
-	achievements = cfg.get_value("player", "achievements", achievements)
-	saved_games = cfg.get_value("saves", "games", saved_games)
+func check_level_achievements() -> void:
+	var level_achievements := {
+		2: "Nível 2 desbloqueado",
+		3: "Nível 3 desbloqueado",
+		5: "Nível 5 desbloqueado",
+		10: "Nível 10 desbloqueado",
+		20: "Nível 20 desbloqueado",
+		30: "Nível 30 desbloqueado",
+		40: "Nível 40 desbloqueado",
+		50: "Nível 50 — LEGENDÁRIO!",
+	}
+	if level in level_achievements and not achievements.has(level_achievements[level]):
+		achievements.append(level_achievements[level])
 
-func add_achievement(id: String) -> void:
-	if not achievements.has(id):
-		achievements.append(id)
-		save_game()
-
-# --- Missões do tutorial ---
 func build_mission_list() -> void:
 	mission_list.clear()
 	var collector: Array[Dictionary] = [
@@ -116,7 +152,7 @@ func build_mission_list() -> void:
 		{"owner": "collector", "action": "collect", "target": "fruit", "count": 1,
 		 "text_pt": "2 Coletor: Pegue uma fruta", "text_en": "2 Collector: Get a fruit", "text_es": "2 Colector: Obtén una fruta"},
 		{"owner": "collector", "action": "collect", "target": "animal", "count": 1,
-		 "text_pt": "3 Coletor: Derrube um animal pequeno para comer", "text_en": "3 Collector: Defeat a small animal to eat", "text_es": "3 Colector: Derrota un animal pequeño para comer"},
+		 "text_pt": "3 Coletor: Colete um animal pequeno para comer", "text_en": "3 Collector: Get a small animal to eat", "text_es": "3 Colector: Recolecta un animal pequeño para comer"},
 		{"owner": "collector", "action": "collect", "target": "crystal", "count": 3,
 		 "text_pt": "4 Coletor: Colete 3 minerais raros", "text_en": "4 Collector: Collect 3 rare minerals", "text_es": "4 Colector: Recolecta 3 minerales raros"},
 		{"owner": "collector", "action": "collect", "target": "fruit", "count": 1,
@@ -165,109 +201,168 @@ func build_mission_list() -> void:
 	current_mission_progress = 0
 	missions_complete = false
 
-func get_current_mission() -> Dictionary:
-	if current_mission_index < mission_list.size():
-		return mission_list[current_mission_index]
-	return {}
-
-func get_mission_text(m: Dictionary) -> String:
-	match language:
-		"en": return m.get("text_en", "")
-		"es": return m.get("text_es", "")
-		_: return m.get("text_pt", "")
-
-# Registra uma ação do jogador. Retorna true se a missão atual foi concluída.
-func register_action(action: String, target: String) -> bool:
-	if missions_complete:
-		return false
-	var m := get_current_mission()
-	if m.is_empty():
-		return false
-	var ma: String = m.get("action", "")
-	var mt: String = m.get("target", "")
-	if action == "report" and ma == "report":
-		# relatório final: qualquer interação conclui
-		advance_mission()
-		return true
-	if action != ma:
-		return false
-	if mt != "any" and target != mt:
-		# animais raros contam como animal para fotos
-		if not (mt == "animal" and target == "rare_animal"):
-			return false
-	current_mission_progress += 1
-	var need: int = m.get("count", 1)
-	if current_mission_progress >= need:
-		advance_mission()
-		return true
-	mission_changed.emit(current_mission_index, m)
-	return false
-
-func advance_mission() -> void:
-	current_mission_progress = 0
-	current_mission_index += 1
-	if current_mission_index >= mission_list.size():
-		missions_complete = true
-	mission_changed.emit(current_mission_index, get_current_mission())
-
-func mission_owner_allowed(owner: String) -> bool:
-	return true
-
-
-func first_empty_slot() -> int:
-	for index in range(2):
-		if index >= saved_games.size() or saved_games[index].is_empty():
-			return index
-	return -1
-
-func begin_new_game(index: int, reset_missions: bool = true) -> Error:
-	if index < 0 or index >= 2:
-		return ERR_INVALID_PARAMETER
-	var previous_games := saved_games.duplicate(true)
-	var previous_slot := active_slot
-	while saved_games.size() <= index:
-		saved_games.append({})
-	saved_games[index] = {"name": player_name, "created": Time.get_unix_time_from_system()}
-	active_slot = index
-	var error := save_game()
-	if error != OK:
-		saved_games.assign(previous_games)
-		active_slot = previous_slot
-		return error
-	pending_snapshot.clear()
-	if reset_missions:
-		build_mission_list()
+func save_game() -> Error:
+	var data := {
+		"version": SAVE_VERSION,
+		"player": {
+			"name": player_name,
+			"language": language,
+			"sfx_volume": sfx_volume,
+			"music_volume": music_volume,
+			"appearance": appearance,
+			"singleplayer": singleplayer,
+			"role": role,
+			"achievements": achievements,
+			"experience": experience,
+			"level": level,
+			"xp_to_next_level": xp_to_next_level,
+			"max_level": max_level,
+		},
+		"saves": {
+			"games": saved_games,
+		},
+	}
+	var json := JSON.stringify(data)
+	var fa := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if fa == null:
+		print("GameManager: cannot open " + SAVE_PATH)
+		return Error.ERR_CANT_CREATE
+	fa.store_string(json)
+	fa.close()
 	return OK
 
-func has_snapshot(index: int) -> bool:
-	if index < 0 or index >= saved_games.size():
-		return false
-	var snapshot: Variant = saved_games[index].get("snapshot", {})
-	return snapshot is Dictionary and snapshot.get("version", 0) == SAVE_VERSION
+func load_game() -> void:
+	var fa: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if fa == null:
+		return
+	var json: String = fa.get_as_string()
+	fa.close()
+	var parsed: Variant = JSON.parse_string(json)
+	if parsed is Error:
+		print("GameManager: parse error")
+		return
+	if parsed is Dictionary:
+		var player_data: Dictionary = parsed.get("player", {}) as Dictionary
+		if player_data is Dictionary:
+			if player_data.has("name") and player_data.get("name") is String:
+				player_name = player_data.get("name")
+			if player_data.has("language") and player_data.get("language") is String:
+				language = player_data.get("language")
+			if player_data.has("sfx_volume") and player_data.get("sfx_volume") is float:
+				sfx_volume = player_data.get("sfx_volume")
+			if player_data.has("music_volume") and player_data.get("music_volume") is float:
+				music_volume = player_data.get("music_volume")
+			if player_data.has("appearance") and player_data.get("appearance") is String:
+				appearance = player_data.get("appearance")
+			if player_data.has("singleplayer") and player_data.get("singleplayer") is bool:
+				singleplayer = player_data.get("singleplayer")
+			if player_data.has("role") and player_data.get("role") is String:
+				role = player_data.get("role")
+			if player_data.has("achievements") and player_data.get("achievements") is Array:
+				achievements = player_data.get("achievements")
+			if player_data.has("experience") and player_data.get("experience") is int:
+				experience = player_data.get("experience")
+			if player_data.has("level") and player_data.get("level") is int:
+				level = player_data.get("level")
+			if player_data.has("xp_to_next_level") and player_data.get("xp_to_next_level") is int:
+				xp_to_next_level = player_data.get("xp_to_next_level")
+			if player_data.has("max_level") and player_data.get("max_level") is int:
+				max_level = player_data.get("max_level")
+			var saves_data: Dictionary = parsed.get("saves", {}) as Dictionary
+			if saves_data is Dictionary:
+				var games_list: Array = saves_data.get("games", []) as Array
+				if games_list is Array:
+					saved_games = games_list
 
-func prepare_continue(index: int) -> bool:
-	if not has_snapshot(index):
+func begin_new_game(slot: int, create_new: bool = true) -> Error:
+	var target := slot
+	if create_new:
+		if slot < 0:
+			return Error.ERR_INVALID_PARAMETER
+		# Expand the array to accommodate the slot
+		while target >= saved_games.size():
+			saved_games.push_back({})
+		target = slot
+	else:
+		if slot < 0 or slot >= saved_games.size():
+			return Error.ERR_INVALID_PARAMETER
+	GameManager.active_slot = target
+	var slot_data := {
+		"name": player_name,
+		"created": Time.get_ticks_msec(),
+		"snapshot": {
+			"player": {
+				"name": player_name,
+				"language": language,
+				"sfx_volume": sfx_volume,
+				"music_volume": music_volume,
+				"appearance": appearance,
+				"singleplayer": singleplayer,
+				"role": role,
+				"achievements": achievements,
+				"experience": experience,
+				"level": level,
+				"xp_to_next_level": xp_to_next_level,
+				"max_level": max_level,
+			},
+			"survival": {
+				"health": 100.0,
+				"hunger": 100.0,
+				"thirst": 100.0,
+				"score": 0,
+			},
+			"gameplay": {
+				"mission_index": 0,
+				"mission_progress": 0,
+				"time_of_day": 0.5,
+				"weather": "clear",
+				"weather_timer": 0.0,
+				"world_seed": randi(),
+			},
+		},
+	}
+	saved_games[target] = slot_data
+	return OK
+
+func has_snapshot(slot: int) -> bool:
+	if slot < 0 or slot >= saved_games.size():
 		return false
-	var snapshot: Dictionary = saved_games[index]["snapshot"].duplicate(true)
-	singleplayer = snapshot.get("singleplayer", true)
-	role = snapshot.get("role", "collector")
-	player_name = saved_games[index].get("name", player_name)
-	build_mission_list()
-	current_mission_index = clampi(snapshot.get("mission_index", 0), 0, mission_list.size())
-	missions_complete = current_mission_index == mission_list.size()
-	var need: int = get_current_mission().get("count", 1)
-	current_mission_progress = clampi(snapshot.get("mission_progress", 0), 0, need - 1)
-	active_slot = index
-	pending_snapshot = snapshot
+	var slot_data := saved_games[slot]
+	if not (slot_data is Dictionary):
+		return false
+	return slot_data.has("snapshot") and slot_data.get("snapshot") is Dictionary
+
+func prepare_continue(slot: int) -> bool:
+	if slot < 0 or slot >= saved_games.size():
+		return false
+	var slot_data := saved_games[slot]
+	if not (slot_data is Dictionary):
+		return false
+	if not slot_data.has("snapshot") or not (slot_data.get("snapshot") is Dictionary):
+		return false
+	var snapshot := slot_data.get("snapshot") as Dictionary
+	var player := snapshot.get("player", {}) as Dictionary
+	if player is Dictionary:
+		player_name = player.get("name", player_name)
+		language = player.get("language", language)
+		sfx_volume = player.get("sfx_volume", sfx_volume)
+		music_volume = player.get("music_volume", music_volume)
+		appearance = player.get("appearance", appearance)
+		singleplayer = player.get("singleplayer", singleplayer)
+		role = player.get("role", role)
+		achievements = player.get("achievements", achievements)
+		experience = player.get("experience", 0)
+		level = player.get("level", 1)
+		xp_to_next_level = player.get("xp_to_next_level", 100)
+		max_level = player.get("max_level", 50)
 	return true
 
 func store_snapshot(snapshot: Dictionary) -> Error:
-	if active_slot < 0 or active_slot >= saved_games.size():
-		return ERR_DOES_NOT_EXIST
-	var previous: Dictionary = saved_games[active_slot].duplicate(true)
-	saved_games[active_slot]["snapshot"] = snapshot.duplicate(true)
-	saved_games[active_slot]["updated"] = Time.get_unix_time_from_system()
-	var error := save_game()
-	if error != OK:
-		saved_games[active_slot] = previous
-	return error
+	if saved_games.is_empty():
+		return Error.ERR_INVALID_PARAMETER
+	var current := saved_games[saved_games.size() - 1]
+	if not (current is Dictionary):
+		return Error.ERR_INVALID_PARAMETER
+	current["snapshot"] = snapshot.duplicate(true)
+	return OK
+

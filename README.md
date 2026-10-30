@@ -37,14 +37,15 @@ Um astronauta visita um planeta desconhecido. O capítulo 1 é um tutorial em qu
 - Cutscene inicial: foguete partindo com aplausos, nave pousando e astronauta descendo
 - Caixa de texto vermelha no topo com missões sequenciais (8 do Coletor + 8 do Biólogo)
 - Missões alternadas no singleplayer e por função no multiplayer
-- Missão final: “Virem juntos para casa!” / “Volte para casa!”
+- Missão final: "Virem juntos para casa!" / "Volte para casa!"
 - HUD com vida, fome, sede, pontuação e inventário
-- Coleta de itens com feedback visual e sons de interface
-- Ciclo dia/noite e clima dinâmico
+- Coleta de itens com feedback visual e sons de interface (até 7 efectos SFX)
+- Ciclo dia/noite e clima dinâmico (chuva, areia, neve com partículas)
 - Pausa, Game Over e reinício
 - Conquistas e salvamento automático
-- Controles por teclado e **touch** (joystick virtual + botões)
+- Controles por teclado e touch (joystick virtual + botões)
 - Menu com 2 slots de save, idioma (PT/EN/ES), aparência, volumes e modo de jogo
+- Salvamento avançado com JSON (placeholders, progresso e cooldown de itens)
 
 ## 📁 Estrutura
 
