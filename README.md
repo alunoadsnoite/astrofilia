@@ -134,3 +134,13 @@ XDG_DATA_HOME=/tmp/astrofilia-save-tests godot --headless --path . --log-file /t
 ```
 
 O modo por função ainda é local; conexão multiplayer não está implementada.
+
+## Controles com duas mãos no Android
+
+Use o polegar esquerdo nas setas de movimento e o direito em **PULAR** ou **AÇÃO**. Os toques são identificados separadamente, permitindo mover enquanto pula ou coleta. Arrastar o dedo entre as setas muda a direção; soltar fora do botão, pausar ou sair do app interrompe o movimento.
+
+Teste de toques simultâneos:
+
+```bash
+XDG_DATA_HOME=/tmp/astrofilia-touch-tests godot --headless --path . --log-file /tmp/astrofilia-touch-tests.log --script tests/multitouch.gd
+```

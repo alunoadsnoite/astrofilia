@@ -41,6 +41,7 @@ var weather_timer: float = 0.0
 
 # Touch
 var touch_dir: Vector2 = Vector2.ZERO
+var touch_fingers: Dictionary = {}
 
 var paused: bool = false
 var game_over: bool = false
@@ -177,7 +178,12 @@ func _spawn_items() -> void:
 		var it := item_scene.instantiate()
 		var angle := i * TAU / 30.0
 		var radius := 6.0 + (i % 5) * 4.0
-		it.position = Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
+		var pos := Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
+		# não deixar itens boiando no lago
+		if Vector2(pos.x - lake_position.x, pos.z - lake_position.z).length() < 6.5:
+			pos.z -= 14.0
+			pos.x += 2.0
+		it.position = pos
 		var idx := i % types.size()
 		it.tipo_item = types[idx]
 		it.collected.connect(_on_item_collected)
@@ -208,85 +214,130 @@ func _show_popup(text: String) -> void:
 	tw.tween_property(lbl, "modulate:a", 0.0, 1.5)
 	tw.tween_callback(lbl.queue_free)
 
+# Três regiões planas e separadas, pintadas logo acima do chão (sem z-fighting
+# e sem colisão extra: o piso do mapa continua sendo o único colisor).
 func _create_biomes() -> void:
 	var biomes := [
-		{"pos": Vector3(-18, -0.5, -18), "color": Color("ce9758"), "name": "Deserto", "accent": Color(0.9, 0.7, 0.3), "prop": "rock"},
-		{"pos": Vector3(18, -0.5, 0), "color": Color("286f64"), "name": "Floresta", "accent": Color(0.2, 0.8, 0.3), "prop": "tree"},
-		{"pos": Vector3(0, -0.5, 18), "color": Color("dcecf0"), "name": "Nevado", "accent": Color(0.5, 0.7, 1.0), "prop": "snow"},
+		{"center": Vector3(-27, 0, 0), "size": Vector2(24, 40), "color": Color("c98f5a"), "name": "DESERTO ROCHOSO", "prop": "rock", "label_color": Color("ffe0b0")},
+		{"center": Vector3(0, 0, 0), "size": Vector2(24, 40), "color": Color("3f7a52"), "name": "FLORESTA", "prop": "tree", "label_color": Color("c6f5cf")},
+		{"center": Vector3(27, 0, 0), "size": Vector2(24, 40), "color": Color("e3eff5"), "name": "NEVADO", "prop": "snow", "label_color": Color("d9f2ff")},
 	]
 	for b in biomes:
-		for gx in range(-1, 2):
-			for gz in range(-1, 2):
-				var mb := MeshInstance3D.new()
-				var bm := BoxMesh.new()
-				var h := 1.0
-				bm.size = Vector3(9, h, 9)
-				mb.mesh = bm
-				var mat := StandardMaterial3D.new()
-				mat.albedo_color = b["color"].darkened(scenery_rng.randf_range(0.0, 0.15))
-				mat.roughness = 0.8
-				mb.material_override = mat
-				mb.position = b["pos"] + Vector3(gx * 9, (h - 1.0) * 0.5, gz * 9)
-				add_child(mb)
-		var sb := StaticBody3D.new()
-		sb.position = b["pos"]
-		var cs := CollisionShape3D.new()
-		var bs := BoxShape3D.new()
-		bs.size = Vector3(26, 1, 26)
-		cs.shape = bs
-		sb.add_child(cs)
-		add_child(sb)
-		for j in range(10):
-			var prop := MeshInstance3D.new()
-			var off := Vector3(scenery_rng.randf_range(-11, 11), 0.5, scenery_rng.randf_range(-11, 11))
-			if b["prop"] == "rock":
-				var rm := SphereMesh.new()
-				rm.radius = scenery_rng.randf_range(0.4, 1.2)
-				rm.height = rm.radius * 1.4
-				prop.mesh = rm
-				prop.position = b["pos"] + off + Vector3(0, rm.radius * 0.7, 0)
-				var pmat := StandardMaterial3D.new()
-				pmat.albedo_color = Color("ac654d")
-				pmat.roughness = 0.9
-				prop.material_override = pmat
-			elif b["prop"] == "tree":
-				var trunk := MeshInstance3D.new()
-				var tm := CylinderMesh.new()
-				tm.top_radius = 0.2
-				tm.bottom_radius = 0.3
-				tm.height = 2.5
-				trunk.mesh = tm
-				trunk.position = b["pos"] + off + Vector3(0, 1.25, 0)
-				var tmat := StandardMaterial3D.new()
-				tmat.albedo_color = Color(0.4, 0.25, 0.1)
-				trunk.material_override = tmat
-				add_child(trunk)
-				var crown := MeshInstance3D.new()
-				var cm := SphereMesh.new()
-				cm.radius = 1.3
-				cm.height = 2.6
-				crown.mesh = cm
-				crown.position = b["pos"] + off + Vector3(0, 3.2, 0)
-				var cmat := StandardMaterial3D.new()
-				cmat.albedo_color = Color("54b995")
-				cmat.emission_enabled = true
-				cmat.emission = Color(0.05, 0.3, 0.1)
-				cmat.emission_energy_multiplier = 0.3
-				crown.material_override = cmat
-				add_child(crown)
-				prop.free()
-				continue
-			else:
-				var sm := SphereMesh.new()
-				sm.radius = scenery_rng.randf_range(0.5, 1.0)
-				sm.height = sm.radius * 1.2
-				prop.mesh = sm
-				prop.position = b["pos"] + off + Vector3(0, sm.radius * 0.6, 0)
-				var pmat := StandardMaterial3D.new()
-				pmat.albedo_color = Color(0.95, 0.97, 1.0)
-				pmat.roughness = 0.3
-				prop.material_override = pmat
-			add_child(prop)
+		var center: Vector3 = b["center"]
+		var bsize: Vector2 = b["size"]
+		# Base do bioma: uma única laje fina, elevada 2 cm acima do piso.
+		var base := _biome_patch(center, bsize, b["color"], 0.02, 0.95)
+		# Manchas de variação, ligeiramente acima da base para dar textura.
+		for k in range(4):
+			var dsize := Vector2(
+				scenery_rng.randf_range(4.0, 8.0),
+				scenery_rng.randf_range(4.0, 8.0)
+			)
+			var dpos := Vector3(
+				center.x + scenery_rng.randf_range(-bsize.x * 0.5 + dsize.x * 0.5, bsize.x * 0.5 - dsize.x * 0.5),
+				0.0,
+				center.z + scenery_rng.randf_range(-bsize.y * 0.5 + dsize.y * 0.5, bsize.y * 0.5 - dsize.y * 0.5)
+			)
+			_biome_patch(dpos, dsize, b["color"].darkened(scenery_rng.randf_range(0.04, 0.14)), 0.03, 0.95)
+		# Enfeites dentro da região.
+		match b["prop"]:
+			"rock":
+				for j in range(9):
+					var rock := MeshInstance3D.new()
+					var rm := SphereMesh.new()
+					rm.radius = scenery_rng.randf_range(0.35, 1.1)
+					rm.height = rm.radius * 1.5
+					rm.radial_segments = 7
+					rock.mesh = rm
+					rock.position = center + Vector3(
+						scenery_rng.randf_range(-bsize.x * 0.45, bsize.x * 0.45),
+						rm.radius * 0.55,
+						scenery_rng.randf_range(-bsize.y * 0.45, bsize.y * 0.45)
+					)
+					rock.rotation.y = scenery_rng.randf_range(0, TAU)
+					var rmat := StandardMaterial3D.new()
+					rmat.albedo_color = Color("a9614a").lightened(scenery_rng.randf_range(0.0, 0.18))
+					rmat.roughness = 0.95
+					rock.material_override = rmat
+					add_child(rock)
+			"tree":
+				for j in range(10):
+					var off := Vector3(
+						scenery_rng.randf_range(-bsize.x * 0.42, bsize.x * 0.42),
+						0.0,
+						scenery_rng.randf_range(-bsize.y * 0.42, bsize.y * 0.42)
+					)
+					# não plantar árvore dentro do lago
+					if Vector2(off.x - lake_position.x, off.z - lake_position.z).length() < 7.0:
+						continue
+					var h := scenery_rng.randf_range(2.2, 3.4)
+					var trunk := MeshInstance3D.new()
+					var tm := CylinderMesh.new()
+					tm.top_radius = 0.18
+					tm.bottom_radius = 0.3
+					tm.height = h
+					trunk.mesh = tm
+					trunk.position = center + off + Vector3(0, h * 0.5, 0)
+					var tmat := StandardMaterial3D.new()
+					tmat.albedo_color = Color("5b3d22")
+					tmat.roughness = 0.9
+					trunk.material_override = tmat
+					add_child(trunk)
+					var crown := MeshInstance3D.new()
+					var cm := SphereMesh.new()
+					cm.radius = scenery_rng.randf_range(1.0, 1.4)
+					cm.height = cm.radius * 1.8
+					cm.radial_segments = 10
+					crown.mesh = cm
+					crown.position = center + off + Vector3(0, h + cm.radius * 0.5, 0)
+					var cmat := StandardMaterial3D.new()
+					cmat.albedo_color = Color("4f9c68").lightened(scenery_rng.randf_range(0.0, 0.15))
+					cmat.roughness = 0.85
+					crown.material_override = cmat
+					add_child(crown)
+			"snow":
+				for j in range(8):
+					var lump := MeshInstance3D.new()
+					var sm := SphereMesh.new()
+					sm.radius = scenery_rng.randf_range(0.45, 1.0)
+					sm.height = sm.radius * 1.1
+					lump.mesh = sm
+					lump.position = center + Vector3(
+						scenery_rng.randf_range(-bsize.x * 0.45, bsize.x * 0.45),
+						sm.radius * 0.35,
+						scenery_rng.randf_range(-bsize.y * 0.45, bsize.y * 0.45)
+					)
+					var smat := StandardMaterial3D.new()
+					smat.albedo_color = Color("f4fbff")
+					smat.roughness = 0.35
+					lump.material_override = smat
+					add_child(lump)
+		# Nome do bioma flutuando sobre ele.
+		var label := Label3D.new()
+		label.text = b["name"]
+		label.position = center + Vector3(0, 3.2, 0)
+		label.font_size = 56
+		label.outline_size = 10
+		label.modulate = b["label_color"]
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = false
+		add_child(label)
+
+func _biome_patch(center: Vector3, size: Vector2, color: Color, y: float, roughness: float) -> MeshInstance3D:
+	var patch := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = size
+	pm.subdivide_width = 2
+	pm.subdivide_depth = 2
+	patch.mesh = pm
+	patch.position = Vector3(center.x, y, center.z)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = roughness
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	patch.material_override = mat
+	add_child(patch)
+	return patch
 
 func _add_lighting() -> void:
 	var omni := OmniLight3D.new()
@@ -312,7 +363,7 @@ func _add_particles() -> void:
 	add_child(particles)
 
 # --- Touch controls ---
-var lake_position: Vector3 = Vector3(-18, 0.3, 8)
+var lake_position: Vector3 = Vector3(0, 0.15, 12)
 
 func _create_lake() -> void:
 	var lake := MeshInstance3D.new()
@@ -374,6 +425,10 @@ var touch_up := false
 var touch_down := false
 
 func _setup_touch() -> void:
+	# Raw touch events track each finger independently; GUI mouse emulation
+	# remains available for menus, but cannot trigger gameplay buttons twice.
+	for button in [left_button, right_button, up_button, down_button, jump_button, interact_button]:
+		button.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	left_button.button_down.connect(func(): touch_left = true; _refresh_touch_dir())
 	left_button.button_up.connect(func(): touch_left = false; _refresh_touch_dir())
 	right_button.button_down.connect(func(): touch_right = true; _refresh_touch_dir())
@@ -382,6 +437,58 @@ func _setup_touch() -> void:
 	up_button.button_up.connect(func(): touch_up = false; _refresh_touch_dir())
 	down_button.button_down.connect(func(): touch_down = true; _refresh_touch_dir())
 	down_button.button_up.connect(func(): touch_down = false; _refresh_touch_dir())
+
+func _input(event: InputEvent) -> void:
+	if paused or game_over or not touch_controls.visible:
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed and not event.canceled:
+			var action := _touch_action_at(event.position)
+			if not action.is_empty():
+				_set_finger_action(event.index, action)
+		else:
+			_set_finger_action(event.index, "")
+			touch_fingers.erase(event.index)
+		if touch_controls.get_global_rect().has_point(event.position):
+			# Leave non-gameplay touches available to the HUD pause button.
+			if _touch_action_at(event.position) != "":
+				get_viewport().set_input_as_handled()
+	elif event is InputEventScreenDrag:
+		if touch_fingers.has(event.index):
+			_set_finger_action(event.index, _touch_action_at(event.position))
+			get_viewport().set_input_as_handled()
+
+func _touch_action_at(point: Vector2) -> String:
+	var controls := {"left": left_button, "right": right_button, "up": up_button, "down": down_button, "jump": jump_button, "interact": interact_button}
+	for action in controls:
+		if controls[action].get_global_rect().has_point(point):
+			return action
+	return ""
+
+func _set_finger_action(index: int, action: String) -> void:
+	var previous: String = touch_fingers.get(index, "")
+	touch_fingers[index] = action
+	var held := touch_fingers.values()
+	touch_left = held.has("left")
+	touch_right = held.has("right")
+	touch_up = held.has("up")
+	touch_down = held.has("down")
+	_refresh_touch_dir()
+	var controls := {"left": left_button, "right": right_button, "up": up_button, "down": down_button, "jump": jump_button, "interact": interact_button}
+	for name in controls:
+		controls[name].set_pressed_no_signal(held.has(name))
+	if action != previous:
+		if action == "jump":
+			_on_jump_pressed()
+		elif action == "interact":
+			_on_interact_pressed()
+
+func _clear_touch() -> void:
+	touch_fingers.clear()
+	_set_finger_action(-1, "")
+	touch_fingers.clear()
+	if is_instance_valid(player):
+		player.external_move = Vector2.ZERO
 
 func _refresh_touch_dir() -> void:
 	var x := (1.0 if touch_right else 0.0) - (1.0 if touch_left else 0.0)
@@ -422,6 +529,7 @@ func _on_interact_pressed() -> void:
 
 # --- Pause / Game Over ---
 func _toggle_pause() -> void:
+	_clear_touch()
 	paused = not paused
 	pause_panel.visible = paused
 	get_tree().paused = paused
@@ -438,6 +546,7 @@ func _quit_to_menu() -> void:
 func _trigger_game_over() -> void:
 	if game_over:
 		return
+	_clear_touch()
 	game_over = true
 	gameover_panel.visible = true
 	get_tree().paused = true
@@ -523,6 +632,7 @@ func _notification(what: int) -> void:
 	if not is_node_ready():
 		return
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_clear_touch()
 		_autosave()
 	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
 		if _save_progress() == OK:
@@ -537,7 +647,7 @@ func _setup_visuals() -> void:
 	ground_material.albedo_color = Color("637b77")
 	ground_material.roughness = 0.95
 	$Ground/Mesh.material_override = ground_material
-	touch_controls.visible = DisplayServer.is_touchscreen_available()
+	touch_controls.visible = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
 	var bar_colors := [Color("f0787e"), Color("efb85c"), Color("55c9dc")]
 	var bars := [health_bar, hunger_bar, thirst_bar]
 	for i in range(bars.size()):
@@ -576,36 +686,36 @@ func _scenery(shape: Mesh, color: Color, pos: Vector3, size: Vector3 = Vector3.O
 	return mesh
 
 func _create_landmarks() -> void:
-	# Warm desert spires, a broad forest canopy, and ice needles aid navigation.
+	# Pontos de referência dentro de cada bioma (sem invadir as outras regiões).
 	for i in range(3):
 		var spire := CylinderMesh.new()
 		spire.top_radius = 0.5
 		spire.bottom_radius = 1.4
 		spire.height = 5.0 + i
 		spire.radial_segments = 6
-		_scenery(spire, Color("b96c50"), Vector3(-22 + i * 2.0, spire.height / 2.0, -22))
+		_scenery(spire, Color("b96c50"), Vector3(-30 + i * 2.2, spire.height / 2.0, -15))
 	var trunk := CylinderMesh.new()
 	trunk.top_radius = 0.35
 	trunk.bottom_radius = 0.65
 	trunk.height = 5.0
-	_scenery(trunk, Color("6d5761"), Vector3(23, 2.5, -7))
+	_scenery(trunk, Color("6d5761"), Vector3(6, 2.5, -10))
 	for i in range(3):
 		var canopy := SphereMesh.new()
 		canopy.radius = 2.7 - i * 0.45
 		canopy.height = 2.0
-		_scenery(canopy, Color("75c4ab").lightened(i * 0.08), Vector3(23, 4.5 + i, -7))
+		_scenery(canopy, Color("75c4ab").lightened(i * 0.08), Vector3(6, 4.5 + i, -10))
 	for i in range(4):
 		var ice := CylinderMesh.new()
 		ice.top_radius = 0
 		ice.bottom_radius = 0.7
 		ice.height = 2.0 + i * 0.65
 		ice.radial_segments = 5
-		_scenery(ice, Color("8abed5"), Vector3(-6 + i * 1.1, ice.height / 2.0, 24))
+		_scenery(ice, Color("8abed5"), Vector3(30 + i * 1.2, ice.height / 2.0, 12))
 	for i in range(36):
 		var flower := SphereMesh.new()
 		flower.radius = 0.14
 		flower.height = 0.25
-		_scenery(flower, Color("ff9988") if i % 2 == 0 else Color("f5ce78"), Vector3(scenery_rng.randf_range(6, 29), 0.16, scenery_rng.randf_range(-11, 11)))
+		_scenery(flower, Color("ff9988") if i % 2 == 0 else Color("f5ce78"), Vector3(scenery_rng.randf_range(-9, 9), 0.16, scenery_rng.randf_range(-16, 16)))
 	var label := Label3D.new()
 	label.text = "LAGO • ÁGUA POTÁVEL"
 	label.position = lake_position + Vector3(0, 1.5, 0)
