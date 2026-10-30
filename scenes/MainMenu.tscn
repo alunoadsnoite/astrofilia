@@ -1,0 +1,269 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/MainMenu.gd" id="1_script"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.05, 0.02, 0.18, 1)
+
+[node name="Stars" type="CPUParticles2D" parent="."]
+position = Vector2(640, 360)
+amount = 180
+lifetime = 4.0
+preprocess = 2.0
+emission_shape = 3
+emission_rect_extents = Vector2(640, 360)
+gravity = Vector2(0, 0)
+initial_velocity_min = 5.0
+initial_velocity_max = 15.0
+scale_amount_min = 0.5
+scale_amount_max = 1.5
+color = Color(1, 1, 1, 0.8)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+theme_override_constants/separation = 24
+alignment = 1
+
+[node name="Title" type="Label" parent="Center/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 64
+text = "ASTROFILIA"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Uma aventura espacial"
+horizontal_alignment = 1
+
+[node name="PlayButton" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(260, 56)
+layout_mode = 2
+text = "Jogar"
+
+[node name="OptionsButton" type="Button" parent="Center/VBox"]
+custom_minimum_size = Vector2(260, 56)
+layout_mode = 2
+text = "Opções"
+
+[node name="PlayPanel" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -200.0
+offset_right = 260.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PlayVBox" type="VBoxContainer" parent="PlayPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="PlayTitle" type="Label" parent="PlayPanel/PlayVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Jogar"
+horizontal_alignment = 1
+
+[node name="NewGameButton" type="Button" parent="PlayPanel/PlayVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Novo jogo"
+
+[node name="Slot1Button" type="Button" parent="PlayPanel/PlayVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Jogo salvo 1 (vazio)"
+
+[node name="Slot2Button" type="Button" parent="PlayPanel/PlayVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Jogo salvo 2 (vazio)"
+
+[node name="PlayBackButton" type="Button" parent="PlayPanel/PlayVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Voltar"
+
+[node name="OptionsPanel" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -260.0
+offset_right = 300.0
+offset_bottom = 260.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="OptionsVBox" type="VBoxContainer" parent="OptionsPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="OptionsTitle" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Opções"
+horizontal_alignment = 1
+
+[node name="UsernameLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Nome de usuário"
+
+[node name="UsernameEdit" type="LineEdit" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+placeholder_text = "Astronauta"
+
+[node name="LanguageLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Idioma"
+
+[node name="LanguageOption" type="OptionButton" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+
+[node name="AppearanceLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Aparência"
+
+[node name="AppearanceOption" type="OptionButton" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+
+[node name="SfxLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Efeitos sonoros"
+
+[node name="SfxSlider" type="HSlider" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="MusicLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Música"
+
+[node name="MusicSlider" type="HSlider" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 1.0
+
+[node name="ModeLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Modo de jogo"
+
+[node name="ModeOption" type="OptionButton" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+
+[node name="RoleLabel" type="Label" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+text = "Função (multijogador)"
+
+[node name="RoleOption" type="OptionButton" parent="OptionsPanel/OptionsVBox"]
+layout_mode = 2
+
+[node name="AchievementsButton" type="Button" parent="OptionsPanel/OptionsVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Conquistas"
+
+[node name="OptionsBackButton" type="Button" parent="OptionsPanel/OptionsVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Voltar"
+
+[node name="AchievementsPanel" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -200.0
+offset_right = 260.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="AchievementsVBox" type="VBoxContainer" parent="AchievementsPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="AchievementsTitle" type="Label" parent="AchievementsPanel/AchievementsVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Conquistas"
+horizontal_alignment = 1
+
+[node name="AchievementsList" type="VBoxContainer" parent="AchievementsPanel/AchievementsVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="AchievementsBackButton" type="Button" parent="AchievementsPanel/AchievementsVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Voltar"

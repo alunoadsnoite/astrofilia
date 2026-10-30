@@ -1,0 +1,325 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/Gameplay.gd" id="1_script"]
+[ext_resource type="Environment" path="res://assets/environment.tres" id="2_env"]
+[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="3_player"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(60, 1, 60)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(60, 1, 60)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_joystick_base"]
+bg_color = Color(1, 1, 1, 0.2)
+corner_radius_top_left = 60
+corner_radius_top_right = 60
+corner_radius_bottom_left = 60
+corner_radius_bottom_right = 60
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_joystick_stick"]
+bg_color = Color(1, 1, 1, 0.5)
+corner_radius_top_left = 30
+corner_radius_top_right = 30
+corner_radius_bottom_left = 30
+corner_radius_bottom_right = 30
+
+[node name="Gameplay" type="Node3D"]
+script = ExtResource("1_script")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("2_env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 20, 0)
+light_energy = 1.2
+shadow_enabled = true
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("BoxMesh_ground")
+
+[node name="Collision" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="Player" parent="." instance=ExtResource("3_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.85, 0.53, 0, -0.53, 0.85, 0, 12, 14)
+fov = 60.0
+
+[node name="Items" type="Node3D" parent="."]
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="HUD" type="Control" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MissionLabel" type="Label" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 60.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = ""
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ScoreLabel" type="Label" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -200.0
+offset_bottom = 40.0
+grow_horizontal = 0
+theme_override_font_sizes/font_size = 20
+text = "Pontos: 0"
+horizontal_alignment = 2
+
+[node name="Bars" type="VBoxContainer" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 220.0
+offset_bottom = 120.0
+theme_override_constants/separation = 6
+
+[node name="HealthLabel" type="Label" parent="CanvasLayer/HUD/Bars"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "❤ Vida"
+
+[node name="HealthBar" type="ProgressBar" parent="CanvasLayer/HUD/Bars"]
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="HungerLabel" type="Label" parent="CanvasLayer/HUD/Bars"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "🍖 Fome"
+
+[node name="HungerBar" type="ProgressBar" parent="CanvasLayer/HUD/Bars"]
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="ThirstLabel" type="Label" parent="CanvasLayer/HUD/Bars"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "💧 Sede"
+
+[node name="ThirstBar" type="ProgressBar" parent="CanvasLayer/HUD/Bars"]
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="InventoryLabel" type="Label" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 130.0
+offset_right = 260.0
+offset_bottom = 260.0
+theme_override_font_sizes/font_size = 14
+text = "Inventário:\n- mineral: 0\n- fruta: 0\n- planta: 0"
+autowrap_mode = 2
+
+[node name="PauseButton" type="Button" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -80.0
+offset_top = 45.0
+offset_right = -10.0
+offset_bottom = 80.0
+grow_horizontal = 0
+text = "⏸"
+
+[node name="PopupContainer" type="VBoxContainer" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -60.0
+offset_right = 150.0
+offset_bottom = 60.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+
+[node name="PausePanel" type="Panel" parent="CanvasLayer"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PauseVBox" type="VBoxContainer" parent="CanvasLayer/PausePanel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -120.0
+offset_top = -100.0
+offset_right = 120.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="PauseTitle" type="Label" parent="CanvasLayer/PausePanel/PauseVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "Pausado"
+horizontal_alignment = 1
+
+[node name="ResumeButton" type="Button" parent="CanvasLayer/PausePanel/PauseVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Continuar"
+
+[node name="QuitButton" type="Button" parent="CanvasLayer/PausePanel/PauseVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Voltar ao menu"
+
+[node name="GameOverPanel" type="Panel" parent="CanvasLayer"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="GameOverVBox" type="VBoxContainer" parent="CanvasLayer/GameOverPanel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -80.0
+offset_right = 150.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="GameOverTitle" type="Label" parent="CanvasLayer/GameOverPanel/GameOverVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "Game Over"
+horizontal_alignment = 1
+
+[node name="RestartButton" type="Button" parent="CanvasLayer/GameOverPanel/GameOverVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Reiniciar"
+
+[node name="HintLabel" type="Label" parent="CanvasLayer/HUD"]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = -40.0
+offset_right = 300.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_font_sizes/font_size = 16
+text = "Toque: arraste para mover | Botões: pular e interagir"
+horizontal_alignment = 1
+
+[node name="TouchControls" type="Control" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="JoystickBase" type="Panel" parent="CanvasLayer/TouchControls"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 30.0
+offset_top = -180.0
+offset_right = 150.0
+offset_bottom = -60.0
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_joystick_base")
+
+[node name="JoystickStick" type="Panel" parent="CanvasLayer/TouchControls/JoystickBase"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -30.0
+offset_top = -30.0
+offset_right = 30.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_joystick_stick")
+
+[node name="JumpButton" type="Button" parent="CanvasLayer/TouchControls"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -180.0
+offset_right = -30.0
+offset_bottom = -60.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "⬆ PULAR"
+theme_override_font_sizes/font_size = 18
+
+[node name="InteractButton" type="Button" parent="CanvasLayer/TouchControls"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 30.0
+offset_top = -320.0
+offset_right = 150.0
+offset_bottom = -200.0
+grow_vertical = 0
+text = "✋ INTERAGIR"
+theme_override_font_sizes/font_size = 14

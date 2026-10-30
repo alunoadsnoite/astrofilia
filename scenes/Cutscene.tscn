@@ -1,0 +1,108 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/Cutscene.gd" id="1_script"]
+[ext_resource type="Environment" path="res://assets/environment.tres" id="2_env"]
+[ext_resource type="Shader" path="res://assets/planet_shader.gdshader" id="3_shader"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_planet"]
+radius = 40.0
+height = 80.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_planet"]
+render_priority = 0
+shader = ExtResource("3_shader")
+shader_parameter/ocean_color = Color(0.15, 0.4, 0.85, 1)
+shader_parameter/continent_color = Color(0.1, 0.5, 0.2, 1)
+shader_parameter/desert_color = Color(0.8, 0.7, 0.3, 1)
+shader_parameter/ice_color = Color(0.9, 0.95, 1.0, 1)
+shader_parameter/noise_scale = 3.0
+shader_parameter/continent_threshold = 0.3
+shader_parameter/desert_threshold = 0.6
+shader_parameter/ice_threshold = 0.8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_rocket"]
+top_radius = 1.5
+bottom_radius = 2.0
+height = 8.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_ship"]
+size = Vector3(6, 2, 4)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_astronaut"]
+radius = 0.6
+height = 2.0
+
+[node name="Cutscene" type="Node3D"]
+script = ExtResource("1_script")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("2_env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 10, 0)
+light_energy = 1.2
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.9, 0.44, 0, -0.44, 0.9, 0, 8, 30)
+fov = 60.0
+
+[node name="Planet" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("SphereMesh_planet")
+surface_material_override/0 = SubResource("ShaderMaterial_planet")
+
+[node name="Rocket" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -5, 45)
+mesh = SubResource("CylinderMesh_rocket")
+
+[node name="Ship" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+mesh = SubResource("BoxMesh_ship")
+visible = false
+
+[node name="Astronaut" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CapsuleMesh_astronaut")
+visible = false
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="MissionPanel" type="ColorRect" parent="CanvasLayer"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 80.0
+grow_horizontal = 2
+color = Color(0.8, 0.1, 0.1, 0.9)
+
+[node name="MissionLabel" type="Label" parent="CanvasLayer/MissionPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 24
+text = ""
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="ApplauseLabel" type="Label" parent="CanvasLayer"]
+visible = false
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -80.0
+offset_right = 200.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(1, 1, 0.3, 1)
+theme_override_font_sizes/font_size = 32
+text = "👏 APLAUSOS! 👏"
+horizontal_alignment = 1
