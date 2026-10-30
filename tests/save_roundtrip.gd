@@ -118,7 +118,8 @@ func run_checks() -> void:
 		var player = load("res://scenes/Player.tscn").instantiate()
 		root.add_child(player)
 		var expected: Color = {"default": Color("edf1e8"), "blue": Color("438bd1"), "red": Color("d86b62"), "green": Color("64b38c")}[appearance]
-		check(player.get_child(3).material_override.albedo_color == expected, "suit material applies " + appearance)
+		var suit_body = player.get_node_or_null("SuitBody")
+		check(suit_body != null and suit_body.material_override.albedo_color == expected, "suit material applies " + appearance)
 		player.queue_free()
 	await process_frame
 	# Legacy metadata has no gameplay to restore, but remains available as a new tutorial.

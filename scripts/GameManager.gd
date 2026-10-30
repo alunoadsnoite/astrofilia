@@ -82,17 +82,33 @@ func get_mission_text(mission: Dictionary) -> String:
 		return mission.get("text_es", pt) as String
 
 func advance_mission() -> void:
-	current_mission_index += 1
 	current_mission_progress = 0
+	current_mission_index += 1
 	if current_mission_index >= mission_list.size():
-		current_mission_index = 0
 		missions_complete = true
-	else:
-		missions_complete = false
+	mission_changed.emit(current_mission_index, get_current_mission())
 
 func register_action(action: String, target: String) -> bool:
-	# Register a completed action
-	return true
+	if missions_complete:
+		return false
+	var mission: Dictionary = get_current_mission()
+	if mission.is_empty():
+		return false
+	var needed_action: String = mission.get("action", "")
+	var needed_target: String = mission.get("target", "any")
+	if action != needed_action:
+		return false
+	if needed_target != "any" and target != needed_target:
+		# animais raros também contam como animal para fotografias
+		if not (needed_target == "animal" and target == "rare_animal"):
+			return false
+	current_mission_progress += 1
+	var needed: int = mission.get("count", 1)
+	if current_mission_progress >= needed:
+		advance_mission()
+		return true
+	mission_changed.emit(current_mission_index, mission)
+	return false
 
 func add_achievement(achievement: String) -> void:
 	if not achievements.has(achievement):
@@ -202,7 +218,7 @@ func build_mission_list() -> void:
 	missions_complete = false
 
 func save_game() -> Error:
-	var data := {
+	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"player": {
 			"name": player_name,
@@ -222,7 +238,7 @@ func save_game() -> Error:
 			"games": saved_games,
 		},
 	}
-	var json := JSON.stringify(data)
+	var json: String = JSON.stringify(data)
 	var fa := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if fa == null:
 		print("GameManager: cannot open " + SAVE_PATH)
@@ -235,44 +251,52 @@ func load_game() -> void:
 	var fa: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.READ)
 	if fa == null:
 		return
-	var json: String = fa.get_as_string()
+	var json: String = fa.get_as_text()
 	fa.close()
 	var parsed: Variant = JSON.parse_string(json)
-	if parsed is Error:
-		print("GameManager: parse error")
+	if not (parsed is Dictionary):
+		print("GameManager: save file could not be parsed")
 		return
-	if parsed is Dictionary:
-		var player_data: Dictionary = parsed.get("player", {}) as Dictionary
-		if player_data is Dictionary:
-			if player_data.has("name") and player_data.get("name") is String:
-				player_name = player_data.get("name")
-			if player_data.has("language") and player_data.get("language") is String:
-				language = player_data.get("language")
-			if player_data.has("sfx_volume") and player_data.get("sfx_volume") is float:
-				sfx_volume = player_data.get("sfx_volume")
-			if player_data.has("music_volume") and player_data.get("music_volume") is float:
-				music_volume = player_data.get("music_volume")
-			if player_data.has("appearance") and player_data.get("appearance") is String:
-				appearance = player_data.get("appearance")
-			if player_data.has("singleplayer") and player_data.get("singleplayer") is bool:
-				singleplayer = player_data.get("singleplayer")
-			if player_data.has("role") and player_data.get("role") is String:
-				role = player_data.get("role")
-			if player_data.has("achievements") and player_data.get("achievements") is Array:
-				achievements = player_data.get("achievements")
-			if player_data.has("experience") and player_data.get("experience") is int:
-				experience = player_data.get("experience")
-			if player_data.has("level") and player_data.get("level") is int:
-				level = player_data.get("level")
-			if player_data.has("xp_to_next_level") and player_data.get("xp_to_next_level") is int:
-				xp_to_next_level = player_data.get("xp_to_next_level")
-			if player_data.has("max_level") and player_data.get("max_level") is int:
-				max_level = player_data.get("max_level")
-			var saves_data: Dictionary = parsed.get("saves", {}) as Dictionary
-			if saves_data is Dictionary:
-				var games_list: Array = saves_data.get("games", []) as Array
-				if games_list is Array:
-					saved_games = games_list
+	var data: Dictionary = parsed
+	var player_data: Dictionary = data.get("player", {}) as Dictionary
+	if player_data is Dictionary:
+		if player_data.get("name") is String:
+			player_name = player_data["name"]
+		if player_data.get("language") is String:
+			language = player_data["language"]
+		if player_data.get("sfx_volume") is float:
+			sfx_volume = player_data["sfx_volume"]
+		if player_data.get("music_volume") is float:
+			music_volume = player_data["music_volume"]
+		if player_data.get("appearance") is String:
+			appearance = player_data["appearance"]
+		if player_data.get("singleplayer") is bool:
+			singleplayer = player_data["singleplayer"]
+		if player_data.get("role") is String:
+			role = player_data["role"]
+		var achievements_raw: Variant = player_data.get("achievements", [])
+		if achievements_raw is Array:
+			achievements.clear()
+			for a in achievements_raw:
+				if a is String:
+					achievements.append(a)
+		if player_data.get("experience") is float or player_data.get("experience") is int:
+			experience = int(player_data["experience"])
+		if player_data.get("level") is float or player_data.get("level") is int:
+			level = int(player_data["level"])
+		if player_data.get("xp_to_next_level") is float or player_data.get("xp_to_next_level") is int:
+			xp_to_next_level = int(player_data["xp_to_next_level"])
+		if player_data.get("max_level") is float or player_data.get("max_level") is int:
+			max_level = int(player_data["max_level"])
+	var saves_data: Dictionary = data.get("saves", {}) as Dictionary
+	if saves_data is Dictionary:
+		var games_list: Array[Dictionary] = []
+		var games_raw: Variant = saves_data.get("games", [])
+		if games_raw is Array:
+			for item in games_raw:
+				if item is Dictionary:
+					games_list.append(item)
+		saved_games = games_list
 
 func begin_new_game(slot: int, create_new: bool = true) -> Error:
 	var target := slot
@@ -340,29 +364,53 @@ func prepare_continue(slot: int) -> bool:
 		return false
 	if not slot_data.has("snapshot") or not (slot_data.get("snapshot") is Dictionary):
 		return false
-	var snapshot := slot_data.get("snapshot") as Dictionary
-	var player := snapshot.get("player", {}) as Dictionary
+	var snapshot: Dictionary = slot_data["snapshot"]
+	var player: Dictionary = snapshot.get("player", {}) as Dictionary
 	if player is Dictionary:
-		player_name = player.get("name", player_name)
-		language = player.get("language", language)
-		sfx_volume = player.get("sfx_volume", sfx_volume)
-		music_volume = player.get("music_volume", music_volume)
-		appearance = player.get("appearance", appearance)
-		singleplayer = player.get("singleplayer", singleplayer)
-		role = player.get("role", role)
-		achievements = player.get("achievements", achievements)
-		experience = player.get("experience", 0)
-		level = player.get("level", 1)
-		xp_to_next_level = player.get("xp_to_next_level", 100)
-		max_level = player.get("max_level", 50)
+		if player.get("name") is String:
+			player_name = player["name"]
+		if player.get("language") is String:
+			language = player["language"]
+		if player.get("sfx_volume") is float:
+			sfx_volume = player["sfx_volume"]
+		if player.get("music_volume") is float:
+			music_volume = player["music_volume"]
+		if player.get("appearance") is String:
+			appearance = player["appearance"]
+		if player.get("singleplayer") is bool:
+			singleplayer = player["singleplayer"]
+		if player.get("role") is String:
+			role = player["role"]
+		var ach: Variant = player.get("achievements", [])
+		if ach is Array:
+			achievements.clear()
+			for a in ach:
+				if a is String:
+					achievements.append(a)
+		experience = int(player.get("experience", experience))
+		level = int(player.get("level", level))
+		xp_to_next_level = int(player.get("xp_to_next_level", xp_to_next_level))
+		max_level = int(player.get("max_level", max_level))
+	if snapshot.get("singleplayer") is bool:
+		singleplayer = snapshot["singleplayer"]
+	if snapshot.get("role") is String:
+		role = snapshot["role"]
+	active_slot = slot
+	pending_snapshot = snapshot.duplicate(true)
+	build_mission_list()
+	var saved_index: int = int(snapshot.get("mission_index", 0))
+	current_mission_progress = int(snapshot.get("mission_progress", 0))
+	current_mission_index = clampi(saved_index, 0, mission_list.size() - 1)
+	missions_complete = saved_index >= mission_list.size()
 	return true
 
 func store_snapshot(snapshot: Dictionary) -> Error:
 	if saved_games.is_empty():
 		return Error.ERR_INVALID_PARAMETER
-	var current := saved_games[saved_games.size() - 1]
-	if not (current is Dictionary):
-		return Error.ERR_INVALID_PARAMETER
+	var slot := active_slot
+	if slot < 0 or slot >= saved_games.size():
+		slot = saved_games.size() - 1
+	var current: Dictionary = saved_games[slot]
 	current["snapshot"] = snapshot.duplicate(true)
 	return OK
 

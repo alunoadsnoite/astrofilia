@@ -30,6 +30,7 @@ func _build_model() -> void:
 	body_mat.albedo_color = suit_color
 	body_mat.roughness = 0.4
 	body.material_override = body_mat
+	body.name = "SuitBody"
 	add_child(body)
 
 	# Cabeça

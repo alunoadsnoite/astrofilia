@@ -9,6 +9,8 @@ extends Node3D
 @onready var hunger_bar: ProgressBar = $CanvasLayer/HUD/Bars/HungerBar
 @onready var thirst_bar: ProgressBar = $CanvasLayer/HUD/Bars/ThirstBar
 @onready var inventory_label: Label = $CanvasLayer/HUD/InventoryLabel
+@onready var level_label: Label = $CanvasLayer/HUD/LevelLabel
+@onready var xp_label: Label = $CanvasLayer/HUD/XpLabel
 @onready var popup_container: VBoxContainer = $CanvasLayer/HUD/PopupContainer
 @onready var pause_panel: Panel = $CanvasLayer/PausePanel
 @onready var gameover_panel: Panel = $CanvasLayer/GameOverPanel
@@ -70,6 +72,7 @@ func _ready() -> void:
 	_update_mission()
 	_update_bars()
 	_update_inventory()
+	_update_level_ui()
 	# Auto-save timer
 	var timer := Timer.new()
 	timer.wait_time = 10.0
@@ -166,6 +169,16 @@ func _update_bars() -> void:
 	hunger_bar.value = hunger
 	thirst_bar.value = thirst
 
+func _update_level_ui() -> void:
+	if not is_instance_valid(level_label) or not is_instance_valid(xp_label):
+		return
+	level_label.text = "Nível: %d" % GameManager.level
+	xp_label.text = "XP: %d/%d" % [GameManager.experience, GameManager.xp_to_next_level]
+
+func _gain_xp(points: int) -> void:
+	GameManager.gain_experience(points)
+	_update_level_ui()
+
 func _update_inventory() -> void:
 	var lines := ["Inventário:"]
 	for k in inventory:
@@ -196,9 +209,11 @@ func _on_item_collected(type: String) -> void:
 		hunger = min(100, hunger + 15)
 		health = min(100, health + 5)
 	_show_popup("+1 %s" % type)
+	_gain_xp(10)
 	var completed: bool = GameManager.register_action("collect", type)
 	_update_mission()
 	if completed:
+		_gain_xp(25)
 		_show_popup("✅ Missão concluída!")
 	_check_achievements()
 
@@ -504,9 +519,10 @@ func _on_interact_pressed() -> void:
 		return
 	var m: Dictionary = GameManager.get_current_mission()
 	if m.get("action", "") == "report":
-		GameManager.advance_mission()
+		var done: bool = GameManager.register_action("report", "any")
+		_gain_xp(25 if done else 5)
 		_update_mission()
-		_show_popup("Relatório entregue!")
+		_show_popup("Relatório entregue!" if done else "Relatório em andamento")
 		return
 	var item: Node3D = _nearest_item()
 	var target := ""
@@ -522,13 +538,11 @@ func _on_interact_pressed() -> void:
 		return
 	if m.get("action", "") == "interact":
 		var completed: bool = GameManager.register_action("interact", target)
+		_gain_xp(25 if completed else 5)
 		_show_popup("Missão concluída!" if completed else "Análise registrada • " + target)
-		GameManager.advance_mission()
-		_update_mission()
 	elif item and target != "lake":
 		item.collect(player)
-		GameManager.advance_mission()
-		_update_mission()
+	_update_mission()
 
 # --- Pause / Game Over ---
 func _toggle_pause() -> void:
@@ -576,12 +590,27 @@ func _snapshot() -> Dictionary:
 		cooldowns.append(item.respawn_timer.time_left)
 	return {
 		"version": GameManager.SAVE_VERSION,
-		"position": player.global_position, "health": health,
+		"position": [player.global_position.x, player.global_position.y, player.global_position.z],
+		"health": health,
 		"hunger": hunger, "thirst": thirst, "score": score,
 		"inventory": inventory.duplicate(true), "time_of_day": time_of_day,
 		"weather": weather, "weather_timer": weather_timer,
 		"world_seed": world_seed, "resource_cooldowns": cooldowns,
 		"singleplayer": GameManager.singleplayer, "role": GameManager.role,
+		"player": {
+			"name": GameManager.player_name,
+			"language": GameManager.language,
+			"sfx_volume": GameManager.sfx_volume,
+			"music_volume": GameManager.music_volume,
+			"appearance": GameManager.appearance,
+			"singleplayer": GameManager.singleplayer,
+			"role": GameManager.role,
+			"achievements": GameManager.achievements.duplicate(),
+			"experience": GameManager.experience,
+			"level": GameManager.level,
+			"xp_to_next_level": GameManager.xp_to_next_level,
+			"max_level": GameManager.max_level,
+		},
 		"mission_index": GameManager.current_mission_index,
 		"mission_progress": GameManager.current_mission_progress,
 	}
@@ -589,25 +618,36 @@ func _snapshot() -> Dictionary:
 func _restore_snapshot(snapshot: Dictionary) -> void:
 	if snapshot.is_empty():
 		return
-	player.global_position = snapshot.get("position", Vector3(0, 1, 0))
+	var saved_position: Variant = snapshot.get("position", null)
+	if saved_position is Array and saved_position.size() == 3:
+		player.global_position = Vector3(saved_position[0], saved_position[1], saved_position[2])
+	elif saved_position is Vector3:
+		player.global_position = saved_position
 	player.velocity = Vector3.ZERO
 	camera.global_position = player.global_position + Vector3(0, 12, 14)
 	camera.look_at(player.global_position, Vector3.UP)
 	health = clampf(snapshot.get("health", 100.0), 1.0, 100.0)
 	hunger = clampf(snapshot.get("hunger", 100.0), 0.0, 100.0)
 	thirst = clampf(snapshot.get("thirst", 100.0), 0.0, 100.0)
-	score = maxi(0, snapshot.get("score", 0))
+	score = maxi(0, int(snapshot.get("score", 0)))
 	player.score = score
 	score_label.text = "Pontos: %d" % score
 	var saved_inventory: Dictionary = snapshot.get("inventory", {})
 	for type in ["mineral", "fruit", "plant", "crystal", "stone", "animal"]:
-		inventory[type] = maxi(0, saved_inventory.get(type, 0))
+		inventory[type] = maxi(0, int(saved_inventory.get(type, 0)))
 	time_of_day = clampf(snapshot.get("time_of_day", 0.3), 0.0, 1.0)
 	weather = snapshot.get("weather", "clear")
 	weather_timer = maxf(0.0, snapshot.get("weather_timer", 0.0))
 	var cooldowns: Array = snapshot.get("resource_cooldowns", [])
 	for i in range(mini(cooldowns.size(), items_node.get_child_count())):
 		items_node.get_child(i).restore_cooldown(cooldowns[i])
+	if not GameManager.mission_list.is_empty():
+		var saved_index: int = int(snapshot.get("mission_index", 0))
+		GameManager.current_mission_index = clampi(saved_index, 0, GameManager.mission_list.size() - 1)
+		GameManager.current_mission_progress = int(snapshot.get("mission_progress", 0))
+		GameManager.missions_complete = saved_index >= GameManager.mission_list.size()
+	_update_mission()
+	_update_level_ui()
 
 func _save_progress() -> Error:
 	if game_over or health <= 0:
@@ -615,11 +655,14 @@ func _save_progress() -> Error:
 	if GameManager.active_slot < 0:
 		var index: int = GameManager.first_empty_slot()
 		if index < 0:
-			return ERR_ALREADY_IN_USE
-		var error: Error = GameManager.begin_new_game(index, false)
+			index = maxi(0, GameManager.saved_games.size() - 1)
+		var error: Error = GameManager.begin_new_game(index, true)
 		if error != OK:
 			return error
-	return GameManager.store_snapshot(_snapshot())
+	var error := GameManager.store_snapshot(_snapshot())
+	if error != OK:
+		return error
+	return GameManager.save_game()
 
 func _autosave() -> void:
 	var error := _save_progress()
