@@ -2,6 +2,8 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
+[![Release](https://img.shields.io/badge/release-v0.1.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.1.0)
+
 ## 📖 História
 
 Um astronauta visita um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, descobre que ela foi destruída — e agora precisa sobreviver aos perigos do planeta: animais, comida venenosa e o clima local.
