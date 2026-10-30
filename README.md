@@ -2,13 +2,13 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.2.1** — correções de missões, save/load e visual dos biomas.
+**Versão do código: 0.3.0** — capítulos, nível/EXP, transição suave de biomas e gráficos mais detalhados.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.2.1-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.2.1)
+[![Release](https://img.shields.io/badge/release-v0.3.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.0)
 
-[⬇️ Baixar Astrofilia.apk (v0.2.1)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.2.1/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.3.0)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.0/Astrofilia.apk)
 
 ## 📖 História
 
@@ -38,14 +38,20 @@ Um astronauta visita um planeta desconhecido. O capítulo 1 é um tutorial em qu
 - Caixa de texto vermelha no topo com missões sequenciais (8 do Coletor + 8 do Biólogo)
 - Missões alternadas no singleplayer e por função no multiplayer
 - Missão final: "Virem juntos para casa!" / "Volte para casa!"
-- HUD com vida, fome, sede, pontuação e inventário
-- Coleta de itens com feedback visual e sons de interface (até 7 efectos SFX)
-- Ciclo dia/noite e clima dinâmico (chuva, areia, neve com partículas)
+- **Capítulos**: aviso central de 3 segundos ("CAPÍTULO 1", "CAPÍTULO 2"...) ao avançar o progresso, com bônus de XP
+- **Nível (NV) e Experiência (EXP)**: barra na HUD, XP por coleta/missão/capítulo e cura parcial ao subir de nível
+- HUD com vida, fome, sede, pontuação e inventário, com porcentagens e alertas coloridos
+- Coleta de itens com feedback visual e efeitos sonoros de interface e de jogo (clique, coleta, missão, nível, capítulo e água)
+- **Fome e sede**: decaimento contínuo influenciado pelo clima, avisos de nível baixo, dano ao chegar a zero e bônus ao comer fruta/carne, beber no lago ou consumir plantas
+- Ciclo dia/noite com sol em órbita, luz da lua, estrelas e clima dinâmico (chuva, neve, tempestade de areia e poeira com partículas próprias)
+- **Biomas com transição suave**: um único terreno com shader mistura deserto, floresta e nevado, sem emendas
+- Gráficos detalhados: cactos, cogumelos, arbustos, pinheiros, cristais de gelo, lago com água animada, margem e vitórias-régias
 - Pausa, Game Over e reinício
 - Conquistas e salvamento automático
 - Controles por teclado e touch (joystick virtual + botões)
 - Menu com 2 slots de save, idioma (PT/EN/ES), aparência, volumes e modo de jogo
 - Salvamento avançado com JSON (placeholders, progresso e cooldown de itens)
+- Ícone do aplicativo: foguete com o nome **Astrofilia**
 
 ## 📁 Estrutura
 
@@ -61,6 +67,7 @@ Astrofilia/
 │   └── Item.tscn
 ├── scripts/
 │   ├── GameManager.gd   (autoload)
+│   ├── Sfx.gd           (autoload de efeitos sonoros)
 │   ├── MainMenu.gd
 │   ├── Cutscene.gd
 │   ├── Gameplay.gd
@@ -68,8 +75,16 @@ Astrofilia/
 │   └── ItemColetavel.gd
 └── assets/
     ├── environment.tres
+    ├── biome_ground.gdshader
+    ├── water.gdshader
     ├── planet_shader.gdshader
-    └── sprites/icon.png
+    ├── audio/
+    │   └── *.wav
+    └── sprites/
+        ├── icon.png
+        ├── icon_192.png
+        ├── icon_adaptive_fg.png
+        └── icon_adaptive_bg.png
 ```
 
 ## ▶️ Como rodar
@@ -103,12 +118,15 @@ MIT — veja [LICENSE](LICENSE).
 
 ## Ajustes de jogabilidade e visual
 
-- Iluminação diurna neutra e noite azulada, com paletas terracota, verde e gelo nos biomas.
+- Iluminação diurna neutra e noite azulada, com sol em órbita, lua e estrelas que aparecem à noite.
+- Terreno único com shader que mistura deserto, floresta e nevado por ruído, criando transições suaves.
 - Recursos com formatos próprios e marcos visuais para orientação.
 - A coleta é manual: aproxime-se e pressione **E / AÇÃO**. Nas missões do Biólogo, a ação analisa o alvo sem consumi-lo.
 - Recursos reaparecem após 12 segundos para permitir concluir missões mesmo após coletas antecipadas.
-- O lago turquesa recupera 40 pontos de hidratação por interação, inclusive após o tutorial.
-- Fome e sede diminuem mais lentamente; frutas recuperam fome ao serem coletadas.
+- O lago com água animada recupera 40 pontos de hidratação por interação, inclusive após o tutorial.
+- Fome e sede diminuem continuamente; o clima altera a velocidade da sede. Frutas (+20 fome, +6 sede), carne (+25 fome) e plantas (+8 sede) ajudam a sobreviver. Abaixo de 25% a HUD avisa e tinge o medidor.
+- A cada capítulo avançado aparece um painel central por 3 segundos e o jogador ganha 50 EXP.
+- EXP é ganha ao coletar (+10), analisar (+5), concluir missão (+25) e avançar capítulo (+50). Ao subir de nível, vida/fome/sede são parcialmente restauradas.
 - Controles de toque aparecem em dispositivos com tela sensível ao toque.
 
 ## Verificação automatizada
@@ -118,6 +136,12 @@ XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/as
 ```
 
 Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
+
+Teste de capítulos, nível/EXP, clima, relógio e shader do terreno:
+
+```bash
+XDG_DATA_HOME=/tmp/astrofilia-progress-tests godot --headless --path . --log-file /tmp/astrofilia-progress-tests.log --script tests/progression.gd
+```
 
 ## Salvamento e aparência
 

@@ -54,6 +54,8 @@ func _ready() -> void:
 	music_slider.value_changed.connect(_on_music_changed)
 	mode_option.item_selected.connect(_on_mode_selected)
 	role_option.item_selected.connect(_on_role_selected)
+	for button in find_children("*", "Button", true, false):
+		button.pressed.connect(func() -> void: Sfx.play("click"))
 
 func _refresh_texts() -> void:
 	play_button.text = GameManager.t("play")

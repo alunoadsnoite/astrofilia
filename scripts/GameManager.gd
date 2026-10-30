@@ -31,6 +31,35 @@ var level: int = 1
 var xp_to_next_level: int = 100
 var max_level: int = 50
 
+# Capítulos (derivados do progresso das missões)
+const CHAPTERS := {
+	1: {
+		"pt": ["CAPÍTULO 1", "A Chegada"],
+		"en": ["CHAPTER 1", "The Arrival"],
+		"es": ["CAPÍTULO 1", "La Llegada"],
+	},
+	2: {
+		"pt": ["CAPÍTULO 2", "A Nave Destruída"],
+		"en": ["CHAPTER 2", "The Wrecked Ship"],
+		"es": ["CAPÍTULO 2", "La Nave Destruida"],
+	},
+	3: {
+		"pt": ["CAPÍTULO 3", "Sobrevivência"],
+		"en": ["CHAPTER 3", "Survival"],
+		"es": ["CAPÍTULO 3", "Supervivencia"],
+	},
+	4: {
+		"pt": ["CAPÍTULO 4", "Segredos do Planeta"],
+		"en": ["CHAPTER 4", "Secrets of the Planet"],
+		"es": ["CAPÍTULO 4", "Secretos del Planeta"],
+	},
+	5: {
+		"pt": ["CAPÍTULO 5", "O Caminho de Casa"],
+		"en": ["CHAPTER 5", "The Way Home"],
+		"es": ["CAPÍTULO 5", "El Camino a Casa"],
+	},
+}
+
 var translations := {
 	"pt": {
 		"play": "Jogar", "options": "Opções", "back": "Voltar",
@@ -124,6 +153,25 @@ func first_empty_slot() -> int:
 func t(key: String) -> String:
 	var dict: Dictionary = translations.get(language, translations["pt"])
 	return dict.get(key, key)
+
+# --- Capítulos ---
+# 16 missões no singleplayer: cap.1 no início, cap.2 em 25%, cap.3 em 50%,
+# cap.4 em 75% e cap.5 ao concluir tudo. No multiplayer (8 missões) os mesmos
+# marcos caem em 2, 4, 6 e 8 missões.
+func chapter_for_index(index: int) -> int:
+	var total := mission_list.size()
+	if total <= 0:
+		return 1
+	if index >= total:
+		return 5
+	return clampi(1 + int(float(index) / float(total) * 4.0), 1, 4)
+
+func get_chapter_data(chapter: int) -> Array:
+	var entry: Dictionary = CHAPTERS.get(clampi(chapter, 1, 5), CHAPTERS[1])
+	var lang := language
+	if not entry.has(lang):
+		lang = "pt"
+	return entry[lang]
 
 func set_language(lang: String) -> void:
 	language = lang
@@ -400,8 +448,12 @@ func prepare_continue(slot: int) -> bool:
 	build_mission_list()
 	var saved_index: int = int(snapshot.get("mission_index", 0))
 	current_mission_progress = int(snapshot.get("mission_progress", 0))
-	current_mission_index = clampi(saved_index, 0, mission_list.size() - 1)
-	missions_complete = saved_index >= mission_list.size()
+	if saved_index >= mission_list.size():
+		current_mission_index = mission_list.size()
+		missions_complete = true
+	else:
+		current_mission_index = clampi(saved_index, 0, mission_list.size() - 1)
+		missions_complete = false
 	return true
 
 func store_snapshot(snapshot: Dictionary) -> Error:

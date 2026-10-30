@@ -184,6 +184,83 @@ func _build_model() -> void:
 		leg.material_override = leg_mat
 		add_child(leg)
 
+	# Botas
+	for x in [-0.15, 0.15]:
+		var boot := MeshInstance3D.new()
+		var boot_mesh := BoxMesh.new()
+		boot_mesh.size = Vector3(0.26, 0.16, 0.4)
+		boot.mesh = boot_mesh
+		boot.position = Vector3(x, -0.42, 0.06)
+		var boot_mat := StandardMaterial3D.new()
+		boot_mat.albedo_color = Color("26384a")
+		boot_mat.roughness = 0.7
+		boot.material_override = boot_mat
+		add_child(boot)
+
+	# Mochila de oxigênio
+	var pack := MeshInstance3D.new()
+	var pack_mesh := BoxMesh.new()
+	pack_mesh.size = Vector3(0.55, 0.6, 0.26)
+	pack.mesh = pack_mesh
+	pack.position = Vector3(0, 0.62, -0.34)
+	var pack_mat := StandardMaterial3D.new()
+	pack_mat.albedo_color = Color("c7d3df")
+	pack_mat.roughness = 0.6
+	pack.material_override = pack_mat
+	add_child(pack)
+
+	for x in [-0.16, 0.16]:
+		var tank := MeshInstance3D.new()
+		var tank_mesh := CylinderMesh.new()
+		tank_mesh.top_radius = 0.09
+		tank_mesh.bottom_radius = 0.09
+		tank_mesh.height = 0.62
+		tank.mesh = tank_mesh
+		tank.position = Vector3(x, 0.62, -0.49)
+		var tank_mat := StandardMaterial3D.new()
+		tank_mat.albedo_color = Color("7fb5c9")
+		tank_mat.metallic = 0.6
+		tank_mat.roughness = 0.35
+		tank.material_override = tank_mat
+		add_child(tank)
+
+	# Antena de comunicação
+	var antenna := MeshInstance3D.new()
+	var antenna_mesh := CylinderMesh.new()
+	antenna_mesh.top_radius = 0.012
+	antenna_mesh.bottom_radius = 0.02
+	antenna_mesh.height = 0.5
+	antenna.mesh = antenna_mesh
+	antenna.position = Vector3(0.26, 1.05, -0.3)
+	antenna.rotation_degrees = Vector3(-12, 0, 8)
+	var antenna_mat := StandardMaterial3D.new()
+	antenna_mat.albedo_color = Color("b9c8d6")
+	antenna_mat.metallic = 0.7
+	antenna.material_override = antenna_mat
+	add_child(antenna)
+
+	var antenna_tip := MeshInstance3D.new()
+	var tip_mesh := SphereMesh.new()
+	tip_mesh.radius = 0.045
+	tip_mesh.height = 0.09
+	antenna_tip.mesh = tip_mesh
+	antenna_tip.position = Vector3(0.31, 1.3, -0.31)
+	var tip_mat := StandardMaterial3D.new()
+	tip_mat.albedo_color = Color("ff8f6b")
+	tip_mat.emission_enabled = true
+	tip_mat.emission = Color("ff5f45")
+	tip_mat.emission_energy_multiplier = 1.2
+	antenna_tip.material_override = tip_mat
+	add_child(antenna_tip)
+
+	# Lanterna do capacete (ajuda a enxergar à noite)
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color("d2e9ff")
+	lamp.light_energy = 0.8
+	lamp.omni_range = 9.0
+	lamp.position = Vector3(0, 1.05, 0.55)
+	add_child(lamp)
+
 	# Colisão (capsule) já existe no Player.tscn
 
 var external_move: Vector2 = Vector2.ZERO

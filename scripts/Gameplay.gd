@@ -8,9 +8,17 @@ extends Node3D
 @onready var health_bar: ProgressBar = $CanvasLayer/HUD/Bars/HealthBar
 @onready var hunger_bar: ProgressBar = $CanvasLayer/HUD/Bars/HungerBar
 @onready var thirst_bar: ProgressBar = $CanvasLayer/HUD/Bars/ThirstBar
+@onready var health_label: Label = $CanvasLayer/HUD/Bars/HealthLabel
+@onready var hunger_label: Label = $CanvasLayer/HUD/Bars/HungerLabel
+@onready var thirst_label: Label = $CanvasLayer/HUD/Bars/ThirstLabel
 @onready var inventory_label: Label = $CanvasLayer/HUD/InventoryLabel
 @onready var level_label: Label = $CanvasLayer/HUD/LevelLabel
 @onready var xp_label: Label = $CanvasLayer/HUD/XpLabel
+@onready var xp_bar: ProgressBar = $CanvasLayer/HUD/XpBar
+@onready var time_label: Label = $CanvasLayer/HUD/TimeLabel
+@onready var chapter_banner: Control = $CanvasLayer/HUD/ChapterBanner
+@onready var chapter_title: Label = $CanvasLayer/HUD/ChapterBanner/ChapterCenter/ChapterPanel/ChapterVBox/ChapterTitle
+@onready var chapter_subtitle: Label = $CanvasLayer/HUD/ChapterBanner/ChapterCenter/ChapterPanel/ChapterVBox/ChapterSubtitle
 @onready var popup_container: VBoxContainer = $CanvasLayer/HUD/PopupContainer
 @onready var pause_panel: Panel = $CanvasLayer/PausePanel
 @onready var gameover_panel: Panel = $CanvasLayer/GameOverPanel
@@ -35,7 +43,7 @@ var inventory: Dictionary = {"mineral": 0, "fruit": 0, "plant": 0, "crystal": 0,
 
 # Time of day
 var time_of_day: float = 0.3  # 0..1
-var day_speed: float = 0.002
+var day_speed: float = 0.003
 
 # Weather
 var weather: String = "clear"  # clear, rain, sandstorm, snow
@@ -51,6 +59,23 @@ var world_seed: int = 0
 var scenery_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var save_error_shown: bool = false
 
+# Progressão / capítulos
+var _last_chapter: int = 0
+var _chapter_tween: Tween
+
+# Avisos de sobrevivência
+var hunger_warning_cooldown: float = 0.0
+var thirst_warning_cooldown: float = 0.0
+
+# Clima e céu
+var weather_root: Node3D
+var rain_fx: CPUParticles3D
+var snow_fx: CPUParticles3D
+var sand_fx: CPUParticles3D
+var dust_fx: CPUParticles3D
+var stars_instance: MultiMeshInstance3D
+var moon_light: DirectionalLight3D
+
 func _ready() -> void:
 	add_to_group("hud")
 	if GameManager.mission_list.is_empty():
@@ -59,20 +84,24 @@ func _ready() -> void:
 	scenery_rng.seed = world_seed
 	_setup_visuals()
 	_spawn_items()
-	_update_mission()
 	_create_biomes()
 	_add_lighting()
-	_add_particles()
+	_create_weather_fx()
 	_create_lake()
 	_create_landmarks()
 	_setup_touch()
 	_restore_snapshot(GameManager.pending_snapshot)
 	GameManager.pending_snapshot.clear()
+	if weather_timer <= 0.0:
+		weather_timer = randf_range(20.0, 40.0)
 	_update_day_night()
 	_update_mission()
 	_update_bars()
 	_update_inventory()
 	_update_level_ui()
+	_update_weather_fx(0.0)
+	_update_time_label()
+	_check_chapter()
 	# Auto-save timer
 	var timer := Timer.new()
 	timer.wait_time = 10.0
@@ -94,14 +123,30 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if paused or game_over:
 		return
-	# Day/night
+	# Ciclo de dia e noite
 	time_of_day = fmod(time_of_day + day_speed * delta, 1.0)
 	_update_day_night()
-	# Stats decay
-	hunger = max(0, hunger - 0.22 * delta)
-	thirst = max(0, thirst - 0.35 * delta)
-	if hunger <= 0 or thirst <= 0:
-		health = max(0, health - 5.0 * delta)
+	_update_time_label()
+	# Fome e sede (o clima acelera ou alivia a sede)
+	var thirst_rate := 0.35
+	match weather:
+		"sandstorm": thirst_rate = 0.55
+		"rain": thirst_rate = 0.28
+		"snow": thirst_rate = 0.30
+	hunger = maxf(0.0, hunger - 0.22 * delta)
+	thirst = maxf(0.0, thirst - thirst_rate * delta)
+	hunger_warning_cooldown = maxf(0.0, hunger_warning_cooldown - delta)
+	thirst_warning_cooldown = maxf(0.0, thirst_warning_cooldown - delta)
+	if hunger <= 25.0 and hunger_warning_cooldown <= 0.0:
+		hunger_warning_cooldown = 30.0
+		_show_popup("🍖 Fome baixa! Coma uma fruta ou um animal.")
+	if thirst <= 25.0 and thirst_warning_cooldown <= 0.0:
+		thirst_warning_cooldown = 30.0
+		_show_popup("💧 Sede baixa! Beba água no lago.")
+	if hunger <= 0.0:
+		health = maxf(0.0, health - 3.0 * delta)
+	if thirst <= 0.0:
+		health = maxf(0.0, health - 3.0 * delta)
 	_update_bars()
 	if health <= 0:
 		_trigger_game_over()
@@ -114,23 +159,51 @@ func _process(delta: float) -> void:
 		var target := player.global_position + Vector3(0, 12, 14)
 		camera.global_position = camera.global_position.lerp(target, 1.0 - exp(-8.0 * delta))
 		camera.look_at(player.global_position, Vector3.UP)
+	_update_weather_fx(delta)
 	_update_mission()
+	_check_chapter()
 	_update_hint()
 	# Controles de toque -> jogador
 	if player:
 		player.external_move = touch_dir
 
 func _update_day_night() -> void:
-	var daylight := clampf(-cos(time_of_day * TAU), 0.0, 1.0)
-	sun.light_energy = lerpf(0.25, 1.2, daylight)
+	var angle := time_of_day * TAU
+	var daylight := clampf(-cos(angle), 0.0, 1.0)
+	var night := 1.0 - daylight
+	# O sol percorre o céu para gerar sombras que mudam ao longo do dia.
+	sun.rotation = Vector3(-deg_to_rad(18.0 + daylight * 68.0), deg_to_rad(35.0), 0.0)
+	sun.light_energy = lerpf(0.04, 1.3, daylight)
 	sun.light_color = Color("b9c9ff").lerp(Color("fff0d5"), daylight)
+	if is_instance_valid(moon_light):
+		moon_light.light_energy = lerpf(0.0, 0.45, night)
+		moon_light.visible = night > 0.02
 	var env: Environment = $WorldEnvironment.environment
-	env.ambient_light_energy = lerpf(0.35, 0.7, daylight)
+	env.ambient_light_energy = lerpf(0.28, 0.72, daylight)
 	env.ambient_light_color = Color("818bb5").lerp(Color("dbe9f0"), daylight)
-	env.fog_light_color = Color("373653").lerp(Color("a1c5cc"), daylight)
+	env.fog_light_color = Color("1d2338").lerp(Color("a1c5cc"), daylight)
+	match weather:
+		"rain":
+			env.fog_light_color = env.fog_light_color.lerp(Color("8794a3"), 0.5)
+		"snow":
+			env.fog_light_color = env.fog_light_color.lerp(Color("dbe8f2"), 0.5)
+		"sandstorm":
+			env.fog_light_color = env.fog_light_color.lerp(Color("c8a06a"), 0.7)
+	var fog_density := 0.002
+	match weather:
+		"rain":
+			fog_density = 0.009
+		"snow":
+			fog_density = 0.012
+		"sandstorm":
+			fog_density = 0.018
+	env.fog_density = fog_density * lerpf(0.7, 1.5, night)
 	var sky_material := env.sky.sky_material as ProceduralSkyMaterial
-	sky_material.sky_top_color = Color("171d40").lerp(Color("24749c"), daylight)
-	sky_material.sky_horizon_color = Color("635075").lerp(Color("b4d8d9"), daylight)
+	sky_material.sky_top_color = Color("10152e").lerp(Color("24749c"), daylight)
+	sky_material.sky_horizon_color = Color("423a62").lerp(Color("b4d8d9"), daylight)
+	if is_instance_valid(stars_instance):
+		stars_instance.visible = night > 0.12
+		stars_instance.transparency = clampf(1.0 - night * 1.4, 0.0, 1.0)
 
 func _change_weather() -> void:
 	weather_timer = randf_range(15.0, 30.0)
@@ -143,7 +216,8 @@ func _change_weather() -> void:
 		weather = "sandstorm"
 	else:
 		weather = "snow"
-	# Could change particle color; skip heavy for now
+	_update_weather_fx(0.0)
+	_update_time_label()
 
 func _update_mission() -> void:
 	var m: Dictionary = GameManager.get_current_mission()
@@ -168,16 +242,44 @@ func _update_bars() -> void:
 	health_bar.value = health
 	hunger_bar.value = hunger
 	thirst_bar.value = thirst
+	if is_instance_valid(health_label):
+		health_label.text = "❤ Vida %d%%" % int(round(health))
+		health_label.modulate = Color(1, 0.55, 0.55) if health <= 25.0 else Color.WHITE
+	if is_instance_valid(hunger_label):
+		hunger_label.text = "🍖 Fome %d%%" % int(round(hunger))
+		hunger_label.modulate = Color(1, 0.68, 0.4) if hunger <= 25.0 else Color.WHITE
+	if is_instance_valid(thirst_label):
+		thirst_label.text = "💧 Sede %d%%" % int(round(thirst))
+		thirst_label.modulate = Color(0.6, 0.85, 1) if thirst <= 25.0 else Color.WHITE
 
 func _update_level_ui() -> void:
 	if not is_instance_valid(level_label) or not is_instance_valid(xp_label):
 		return
-	level_label.text = "Nível: %d" % GameManager.level
-	xp_label.text = "XP: %d/%d" % [GameManager.experience, GameManager.xp_to_next_level]
+	level_label.text = "NV %d" % GameManager.level
+	if GameManager.level >= GameManager.max_level:
+		xp_label.text = "EXP MAX"
+		if is_instance_valid(xp_bar):
+			xp_bar.max_value = 1.0
+			xp_bar.value = 1.0
+		return
+	var needed := maxi(1, GameManager.xp_to_next_level)
+	xp_label.text = "EXP %d/%d" % [GameManager.experience, needed]
+	if is_instance_valid(xp_bar):
+		xp_bar.max_value = float(needed)
+		xp_bar.value = float(clampi(GameManager.experience, 0, needed))
 
 func _gain_xp(points: int) -> void:
+	var previous_level: int = GameManager.level
 	GameManager.gain_experience(points)
 	_update_level_ui()
+	if GameManager.level > previous_level:
+		# Subir de nível recupera um pouco de vida, fome e sede.
+		health = minf(100.0, health + 12.0)
+		hunger = minf(100.0, hunger + 10.0)
+		thirst = minf(100.0, thirst + 10.0)
+		_update_bars()
+		Sfx.play("level")
+		_show_level_up(GameManager.level)
 
 func _update_inventory() -> void:
 	var lines := ["Inventário:"]
@@ -203,16 +305,30 @@ func _spawn_items() -> void:
 		items_node.add_child(it)
 
 func _on_item_collected(type: String) -> void:
+	Sfx.play("collect")
 	inventory[type] = inventory.get(type, 0) + 1
 	_update_inventory()
-	if type == "fruit":
-		hunger = min(100, hunger + 15)
-		health = min(100, health + 5)
-	_show_popup("+1 %s" % type)
+	match type:
+		"fruit":
+			hunger = minf(100.0, hunger + 20.0)
+			thirst = minf(100.0, thirst + 6.0)
+			health = minf(100.0, health + 4.0)
+			_show_popup("🍎 Fruta • +20 fome, +6 sede")
+		"animal":
+			hunger = minf(100.0, hunger + 25.0)
+			health = minf(100.0, health + 6.0)
+			_show_popup("🍖 Carne • +25 fome")
+		"plant":
+			thirst = minf(100.0, thirst + 8.0)
+			_show_popup("🌿 Planta • +8 sede")
+		_:
+			_show_popup("+1 %s" % type)
+	_update_bars()
 	_gain_xp(10)
 	var completed: bool = GameManager.register_action("collect", type)
 	_update_mission()
 	if completed:
+		Sfx.play("mission")
 		_gain_xp(25)
 		_show_popup("✅ Missão concluída!")
 	_check_achievements()
@@ -229,130 +345,179 @@ func _show_popup(text: String) -> void:
 	tw.tween_property(lbl, "modulate:a", 0.0, 1.5)
 	tw.tween_callback(lbl.queue_free)
 
-# Três regiões planas e separadas, pintadas logo acima do chão (sem z-fighting
-# e sem colisão extra: o piso do mapa continua sendo o único colisor).
+# Terreno único que cobre as três regiões. O shader mistura deserto, floresta
+# e nevado com ruído e transições suaves, sem emendas visíveis e sem
+# z-fighting (fica 2 cm acima do piso, que continua sendo o único colisor).
 func _create_biomes() -> void:
-	var biomes := [
-		{"center": Vector3(-27, 0, 0), "size": Vector2(24, 40), "color": Color("c98f5a"), "name": "DESERTO ROCHOSO", "prop": "rock", "label_color": Color("ffe0b0")},
-		{"center": Vector3(0, 0, 0), "size": Vector2(24, 40), "color": Color("3f7a52"), "name": "FLORESTA", "prop": "tree", "label_color": Color("c6f5cf")},
-		{"center": Vector3(27, 0, 0), "size": Vector2(24, 40), "color": Color("e3eff5"), "name": "NEVADO", "prop": "snow", "label_color": Color("d9f2ff")},
+	var ground := MeshInstance3D.new()
+	ground.name = "BiomeGround"
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(90, 90)
+	plane.subdivide_width = 40
+	plane.subdivide_depth = 40
+	ground.mesh = plane
+	ground.position = Vector3(0, 0.02, 0)
+	var material := ShaderMaterial.new()
+	material.shader = load("res://assets/biome_ground.gdshader")
+	ground.material_override = material
+	add_child(ground)
+
+	_build_desert_props()
+	_build_forest_props()
+	_build_snow_props()
+
+	var regions := [
+		{"center": Vector3(-27, 0, 0), "name": "DESERTO ROCHOSO", "label_color": Color("ffe0b0")},
+		{"center": Vector3(0, 0, 0), "name": "FLORESTA", "label_color": Color("c6f5cf")},
+		{"center": Vector3(27, 0, 0), "name": "NEVADO", "label_color": Color("d9f2ff")},
 	]
-	for b in biomes:
-		var center: Vector3 = b["center"]
-		var bsize: Vector2 = b["size"]
-		# Base do bioma: uma única laje fina, elevada 2 cm acima do piso.
-		var base := _biome_patch(center, bsize, b["color"], 0.02, 0.95)
-		# Manchas de variação, ligeiramente acima da base para dar textura.
-		for k in range(4):
-			var dsize := Vector2(
-				scenery_rng.randf_range(4.0, 8.0),
-				scenery_rng.randf_range(4.0, 8.0)
-			)
-			var dpos := Vector3(
-				center.x + scenery_rng.randf_range(-bsize.x * 0.5 + dsize.x * 0.5, bsize.x * 0.5 - dsize.x * 0.5),
-				0.0,
-				center.z + scenery_rng.randf_range(-bsize.y * 0.5 + dsize.y * 0.5, bsize.y * 0.5 - dsize.y * 0.5)
-			)
-			_biome_patch(dpos, dsize, b["color"].darkened(scenery_rng.randf_range(0.04, 0.14)), 0.03, 0.95)
-		# Enfeites dentro da região.
-		match b["prop"]:
-			"rock":
-				for j in range(9):
-					var rock := MeshInstance3D.new()
-					var rm := SphereMesh.new()
-					rm.radius = scenery_rng.randf_range(0.35, 1.1)
-					rm.height = rm.radius * 1.5
-					rm.radial_segments = 7
-					rock.mesh = rm
-					rock.position = center + Vector3(
-						scenery_rng.randf_range(-bsize.x * 0.45, bsize.x * 0.45),
-						rm.radius * 0.55,
-						scenery_rng.randf_range(-bsize.y * 0.45, bsize.y * 0.45)
-					)
-					rock.rotation.y = scenery_rng.randf_range(0, TAU)
-					var rmat := StandardMaterial3D.new()
-					rmat.albedo_color = Color("a9614a").lightened(scenery_rng.randf_range(0.0, 0.18))
-					rmat.roughness = 0.95
-					rock.material_override = rmat
-					add_child(rock)
-			"tree":
-				for j in range(10):
-					var off := Vector3(
-						scenery_rng.randf_range(-bsize.x * 0.42, bsize.x * 0.42),
-						0.0,
-						scenery_rng.randf_range(-bsize.y * 0.42, bsize.y * 0.42)
-					)
-					# não plantar árvore dentro do lago
-					if Vector2(off.x - lake_position.x, off.z - lake_position.z).length() < 7.0:
-						continue
-					var h := scenery_rng.randf_range(2.2, 3.4)
-					var trunk := MeshInstance3D.new()
-					var tm := CylinderMesh.new()
-					tm.top_radius = 0.18
-					tm.bottom_radius = 0.3
-					tm.height = h
-					trunk.mesh = tm
-					trunk.position = center + off + Vector3(0, h * 0.5, 0)
-					var tmat := StandardMaterial3D.new()
-					tmat.albedo_color = Color("5b3d22")
-					tmat.roughness = 0.9
-					trunk.material_override = tmat
-					add_child(trunk)
-					var crown := MeshInstance3D.new()
-					var cm := SphereMesh.new()
-					cm.radius = scenery_rng.randf_range(1.0, 1.4)
-					cm.height = cm.radius * 1.8
-					cm.radial_segments = 10
-					crown.mesh = cm
-					crown.position = center + off + Vector3(0, h + cm.radius * 0.5, 0)
-					var cmat := StandardMaterial3D.new()
-					cmat.albedo_color = Color("4f9c68").lightened(scenery_rng.randf_range(0.0, 0.15))
-					cmat.roughness = 0.85
-					crown.material_override = cmat
-					add_child(crown)
-			"snow":
-				for j in range(8):
-					var lump := MeshInstance3D.new()
-					var sm := SphereMesh.new()
-					sm.radius = scenery_rng.randf_range(0.45, 1.0)
-					sm.height = sm.radius * 1.1
-					lump.mesh = sm
-					lump.position = center + Vector3(
-						scenery_rng.randf_range(-bsize.x * 0.45, bsize.x * 0.45),
-						sm.radius * 0.35,
-						scenery_rng.randf_range(-bsize.y * 0.45, bsize.y * 0.45)
-					)
-					var smat := StandardMaterial3D.new()
-					smat.albedo_color = Color("f4fbff")
-					smat.roughness = 0.35
-					lump.material_override = smat
-					add_child(lump)
-		# Nome do bioma flutuando sobre ele.
+	for region in regions:
 		var label := Label3D.new()
-		label.text = b["name"]
-		label.position = center + Vector3(0, 3.2, 0)
+		label.text = region["name"]
+		label.position = region["center"] + Vector3(0, 3.4, 0)
 		label.font_size = 56
-		label.outline_size = 10
-		label.modulate = b["label_color"]
+		label.outline_size = 12
+		label.modulate = region["label_color"]
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test = false
 		add_child(label)
 
-func _biome_patch(center: Vector3, size: Vector2, color: Color, y: float, roughness: float) -> MeshInstance3D:
-	var patch := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = size
-	pm.subdivide_width = 2
-	pm.subdivide_depth = 2
-	patch.mesh = pm
-	patch.position = Vector3(center.x, y, center.z)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = roughness
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	patch.material_override = mat
-	add_child(patch)
-	return patch
+func _prop(shape: Mesh, color: Color, pos: Vector3, scale_factor: Vector3 = Vector3.ONE, rot_y: float = 0.0) -> MeshInstance3D:
+	var inst := _scenery(shape, color, pos, scale_factor)
+	inst.rotation.y = rot_y
+	return inst
+
+func _build_desert_props() -> void:
+	# Cactos com braços laterais.
+	for i in range(7):
+		var base := Vector3(scenery_rng.randf_range(-38.0, -17.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
+		var h := scenery_rng.randf_range(1.5, 2.8)
+		var trunk := CylinderMesh.new()
+		trunk.top_radius = 0.22
+		trunk.bottom_radius = 0.3
+		trunk.height = h
+		trunk.radial_segments = 8
+		_prop(trunk, Color("4f8f56"), base + Vector3(0, h * 0.5, 0))
+		for side in [-1.0, 1.0]:
+			var arm := CylinderMesh.new()
+			arm.top_radius = 0.11
+			arm.bottom_radius = 0.14
+			arm.height = scenery_rng.randf_range(0.5, 0.9)
+			arm.radial_segments = 6
+			var arm_node := _prop(arm, Color("58a05f"), base + Vector3(side * 0.42, h * 0.6, 0))
+			arm_node.rotation.z = side * deg_to_rad(72)
+	# Pedras e cascalho.
+	for i in range(14):
+		var rock := SphereMesh.new()
+		rock.radius = scenery_rng.randf_range(0.25, 0.9)
+		rock.height = rock.radius * scenery_rng.randf_range(0.9, 1.6)
+		rock.radial_segments = 7
+		_prop(rock, Color("a9614a").lightened(scenery_rng.randf_range(0.0, 0.2)), Vector3(scenery_rng.randf_range(-38.0, -16.0), rock.radius * 0.4, scenery_rng.randf_range(-17.0, 17.0)), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+	# Tufos de capim seco.
+	for i in range(26):
+		var tuft := CylinderMesh.new()
+		tuft.top_radius = 0.0
+		tuft.bottom_radius = 0.09
+		tuft.height = scenery_rng.randf_range(0.3, 0.7)
+		tuft.radial_segments = 4
+		_prop(tuft, Color("b39a5c"), Vector3(scenery_rng.randf_range(-38.0, -16.0), tuft.height * 0.5, scenery_rng.randf_range(-17.0, 17.0)), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+
+func _build_forest_props() -> void:
+	# Árvores com copa em camadas (fora do lago).
+	for i in range(14):
+		var off := Vector3(scenery_rng.randf_range(-10.0, 10.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
+		if Vector2(off.x - lake_position.x, off.z - lake_position.z).length() < 7.5:
+			continue
+		var h := scenery_rng.randf_range(2.4, 3.8)
+		var trunk := CylinderMesh.new()
+		trunk.top_radius = 0.16
+		trunk.bottom_radius = 0.28
+		trunk.height = h
+		trunk.radial_segments = 8
+		_prop(trunk, Color("5b3d22"), off + Vector3(0, h * 0.5, 0))
+		for layer in range(3):
+			var crown := SphereMesh.new()
+			crown.radius = (1.25 - layer * 0.22) * scenery_rng.randf_range(0.9, 1.1)
+			crown.height = crown.radius * 1.5
+			crown.radial_segments = 10
+			crown.rings = 6
+			_prop(crown, Color("4f9c68").lightened(layer * 0.07 + scenery_rng.randf_range(0.0, 0.08)), off + Vector3(0, h + layer * 0.55, 0), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+	# Arbustos.
+	for i in range(12):
+		var bush := SphereMesh.new()
+		bush.radius = scenery_rng.randf_range(0.45, 0.8)
+		bush.height = bush.radius * 1.25
+		bush.radial_segments = 8
+		var bpos := Vector3(scenery_rng.randf_range(-10.0, 10.0), bush.radius * 0.5, scenery_rng.randf_range(-17.0, 17.0))
+		if Vector2(bpos.x - lake_position.x, bpos.z - lake_position.z).length() < 6.5:
+			continue
+		_prop(bush, Color("3f8556").lightened(scenery_rng.randf_range(0.0, 0.12)), bpos, Vector3(1.0, 0.8, 1.0), scenery_rng.randf_range(0.0, TAU))
+	# Cogumelos.
+	for i in range(9):
+		var mpos := Vector3(scenery_rng.randf_range(-9.0, 9.0), 0.0, scenery_rng.randf_range(-16.0, 16.0))
+		if Vector2(mpos.x - lake_position.x, mpos.z - lake_position.z).length() < 6.0:
+			continue
+		var stem_h := scenery_rng.randf_range(0.22, 0.4)
+		var stem := CylinderMesh.new()
+		stem.top_radius = 0.05
+		stem.bottom_radius = 0.07
+		stem.height = stem_h
+		stem.radial_segments = 6
+		_prop(stem, Color("efe6d2"), mpos + Vector3(0, stem_h * 0.5, 0))
+		var cap := SphereMesh.new()
+		cap.radius = scenery_rng.randf_range(0.18, 0.3)
+		cap.height = cap.radius
+		cap.radial_segments = 10
+		_prop(cap, Color("d8564f") if i % 2 == 0 else Color("c98a4b"), mpos + Vector3(0, stem_h, 0), Vector3(1.0, 0.7, 1.0))
+	# Tufos de grama.
+	for i in range(30):
+		var gpos := Vector3(scenery_rng.randf_range(-10.0, 10.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
+		if Vector2(gpos.x - lake_position.x, gpos.z - lake_position.z).length() < 6.0:
+			continue
+		var blade := CylinderMesh.new()
+		blade.top_radius = 0.0
+		blade.bottom_radius = 0.07
+		blade.height = scenery_rng.randf_range(0.25, 0.5)
+		blade.radial_segments = 4
+		_prop(blade, Color("74b96f"), gpos + Vector3(0, blade.height * 0.5, 0), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+
+func _build_snow_props() -> void:
+	# Pinheiros nevados.
+	for i in range(9):
+		var base := Vector3(scenery_rng.randf_range(17.0, 38.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
+		var h := scenery_rng.randf_range(2.0, 3.2)
+		var trunk := CylinderMesh.new()
+		trunk.top_radius = 0.13
+		trunk.bottom_radius = 0.22
+		trunk.height = h
+		trunk.radial_segments = 6
+		_prop(trunk, Color("6b5a4d"), base + Vector3(0, h * 0.5, 0))
+		for layer in range(3):
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.0
+			cone.bottom_radius = 1.15 - layer * 0.25
+			cone.height = 1.2 - layer * 0.15
+			cone.radial_segments = 7
+			_prop(cone, Color("e8f6ff").lightened(layer * 0.03), base + Vector3(0, h * 0.75 + layer * 0.62, 0), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+	# Cristais de gelo com brilho sutil.
+	for i in range(8):
+		var crystal := CylinderMesh.new()
+		crystal.top_radius = 0.0
+		crystal.bottom_radius = scenery_rng.randf_range(0.25, 0.5)
+		crystal.height = scenery_rng.randf_range(0.9, 2.2)
+		crystal.radial_segments = 5
+		var node := _prop(crystal, Color("9ed8f0"), Vector3(scenery_rng.randf_range(17.0, 38.0), crystal.height * 0.4, scenery_rng.randf_range(-17.0, 17.0)), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+		var crystal_mat := node.material_override as StandardMaterial3D
+		if crystal_mat:
+			crystal_mat.emission_enabled = true
+			crystal_mat.emission = Color("74c5e8")
+			crystal_mat.emission_energy_multiplier = 0.35
+	# Montes de neve.
+	for i in range(12):
+		var drift := SphereMesh.new()
+		drift.radius = scenery_rng.randf_range(0.5, 1.2)
+		drift.height = drift.radius * 0.55
+		drift.radial_segments = 8
+		_prop(drift, Color("f5fbff"), Vector3(scenery_rng.randf_range(16.0, 39.0), drift.radius * 0.2, scenery_rng.randf_range(-18.0, 18.0)))
 
 func _add_lighting() -> void:
 	var omni := OmniLight3D.new()
@@ -361,21 +526,192 @@ func _add_lighting() -> void:
 	omni.omni_range = 30.0
 	omni.position = Vector3(0, 8, 0)
 	add_child(omni)
+	moon_light = DirectionalLight3D.new()
+	moon_light.light_color = Color("9fb6e8")
+	moon_light.light_energy = 0.0
+	moon_light.shadow_enabled = true
+	moon_light.rotation_degrees = Vector3(-58, 40, 0)
+	add_child(moon_light)
+	_create_stars()
 
-func _add_particles() -> void:
-	var particles := CPUParticles3D.new()
-	particles.amount = 200
-	particles.lifetime = 6.0
-	particles.preprocess = 3.0
-	particles.emission_shape = 2
-	particles.emission_box_extents = Vector3(40, 10, 40)
-	particles.gravity = Vector3(0, -0.5, 0)
-	particles.initial_velocity_min = 0.5
-	particles.initial_velocity_max = 1.5
-	particles.scale_amount_min = 0.05
-	particles.scale_amount_max = 0.15
-	particles.color = Color(0.8, 0.9, 1.0, 0.6)
-	add_child(particles)
+func _create_stars() -> void:
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.09
+	sphere.height = 0.18
+	sphere.radial_segments = 4
+	sphere.rings = 2
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = sphere
+	mm.instance_count = 220
+	for i in range(mm.instance_count):
+		var dir := Vector3(
+			scenery_rng.randf_range(-1.0, 1.0),
+			scenery_rng.randf_range(0.12, 1.0),
+			scenery_rng.randf_range(-1.0, 1.0)
+		).normalized()
+		var pos := dir * 70.0
+		var s := scenery_rng.randf_range(0.45, 1.6)
+		mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * s), pos))
+		mm.set_instance_color(i, Color(0.85, 0.9, 1.0).lerp(Color(1.0, 0.86, 0.72), scenery_rng.randf()))
+	stars_instance = MultiMeshInstance3D.new()
+	stars_instance.name = "Stars"
+	stars_instance.multimesh = mm
+	stars_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var star_mat := StandardMaterial3D.new()
+	star_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	star_mat.vertex_color_use_as_albedo = true
+	star_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	stars_instance.material_override = star_mat
+	add_child(stars_instance)
+
+func _create_weather_fx() -> void:
+	weather_root = Node3D.new()
+	weather_root.name = "WeatherFX"
+	add_child(weather_root)
+
+	var rain := BoxMesh.new()
+	rain.size = Vector3(0.035, 0.55, 0.035)
+	var rain_mat := StandardMaterial3D.new()
+	rain_mat.albedo_color = Color(0.66, 0.82, 1.0, 0.75)
+	rain_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rain_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rain.material = rain_mat
+	rain_fx = _make_particles(rain, Color(0.66, 0.82, 1.0, 0.8), 420, 1.1, Vector3(22, 0.6, 22), 3.0, 6.0, Vector3(0, -20.0, 0), Vector3(0, -1, 0), 4.0, 0.8, 1.4, Vector3(0, 9, 0))
+
+	var flake := SphereMesh.new()
+	flake.radius = 0.07
+	flake.height = 0.14
+	flake.radial_segments = 6
+	flake.rings = 3
+	var snow_mat := StandardMaterial3D.new()
+	snow_mat.albedo_color = Color(0.95, 0.98, 1.0, 0.9)
+	snow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	snow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flake.material = snow_mat
+	snow_fx = _make_particles(flake, Color(0.95, 0.98, 1.0, 0.9), 320, 7.0, Vector3(22, 9, 22), 0.7, 1.5, Vector3(0, -1.2, 0), Vector3(0, -1, 0), 30.0, 0.7, 1.5, Vector3(0, 6, 0))
+
+	var grain := BoxMesh.new()
+	grain.size = Vector3(0.12, 0.05, 0.12)
+	var sand_mat := StandardMaterial3D.new()
+	sand_mat.albedo_color = Color(0.82, 0.68, 0.44, 0.75)
+	sand_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sand_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	grain.material = sand_mat
+	sand_fx = _make_particles(grain, Color(0.82, 0.68, 0.44, 0.75), 500, 2.2, Vector3(24, 6, 24), 9.0, 16.0, Vector3(0, -1.5, 0), Vector3(1, 0, 0.25), 25.0, 0.8, 1.8, Vector3(0, 4, 0))
+
+	var mote := SphereMesh.new()
+	mote.radius = 0.05
+	mote.height = 0.1
+	mote.radial_segments = 5
+	mote.rings = 2
+	var dust_mat := StandardMaterial3D.new()
+	dust_mat.albedo_color = Color(0.9, 0.95, 1.0, 0.35)
+	dust_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dust_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mote.material = dust_mat
+	dust_fx = _make_particles(mote, Color(0.9, 0.95, 1.0, 0.35), 160, 5.0, Vector3(22, 1, 22), 0.3, 1.0, Vector3(0, 0.15, 0), Vector3(0.3, 1, 0.1), 60.0, 0.6, 1.3, Vector3(0, 0.9, 0))
+
+func _make_particles(mesh: Mesh, color: Color, amount: int, lifetime: float, extents: Vector3, vel_min: float, vel_max: float, gravity: Vector3, direction: Vector3, spread: float, scale_min: float, scale_max: float, offset: Vector3) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.mesh = mesh
+	p.amount = amount
+	p.lifetime = lifetime
+	p.preprocess = lifetime
+	p.local_coords = true
+	p.emitting = false
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	p.emission_box_extents = extents
+	p.position = offset
+	p.direction = direction
+	p.spread = spread
+	p.gravity = gravity
+	p.initial_velocity_min = vel_min
+	p.initial_velocity_max = vel_max
+	p.scale_amount_min = scale_min
+	p.scale_amount_max = scale_max
+	p.color = color
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	weather_root.add_child(p)
+	return p
+
+func _update_weather_fx(_delta: float) -> void:
+	if weather_root == null or player == null:
+		return
+	weather_root.global_position = player.global_position
+	var active := not paused and not game_over
+	if is_instance_valid(rain_fx):
+		rain_fx.emitting = active and weather == "rain"
+	if is_instance_valid(snow_fx):
+		snow_fx.emitting = active and weather == "snow"
+	if is_instance_valid(sand_fx):
+		sand_fx.emitting = active and weather == "sandstorm"
+	if is_instance_valid(dust_fx):
+		dust_fx.emitting = active and weather == "clear"
+
+func _update_time_label() -> void:
+	if not is_instance_valid(time_label):
+		return
+	var total_minutes := int(time_of_day * 24.0 * 60.0) % 1440
+	var hours := total_minutes / 60
+	var minutes := total_minutes % 60
+	var icon := "☀"
+	if hours < 6 or hours >= 19:
+		icon = "🌙"
+	match weather:
+		"rain":
+			icon = "🌧"
+		"snow":
+			icon = "❄"
+		"sandstorm":
+			icon = "🌪"
+	time_label.text = "%s %02d:%02d" % [icon, hours, minutes]
+
+func _check_chapter() -> void:
+	if GameManager.mission_list.is_empty():
+		return
+	var chapter: int = GameManager.chapter_for_index(GameManager.current_mission_index)
+	if GameManager.missions_complete:
+		chapter = 5
+	if chapter == _last_chapter:
+		return
+	var first_time := _last_chapter == 0
+	_last_chapter = chapter
+	_show_chapter(chapter, not first_time)
+
+func _show_chapter(chapter: int, grant_xp: bool) -> void:
+	var data: Array = GameManager.get_chapter_data(chapter)
+	chapter_title.text = str(data[0])
+	chapter_subtitle.text = str(data[1])
+	Sfx.play("chapter")
+	if grant_xp:
+		_gain_xp(50)
+	chapter_banner.visible = true
+	chapter_banner.modulate.a = 0.0
+	if _chapter_tween and _chapter_tween.is_valid():
+		_chapter_tween.kill()
+	_chapter_tween = create_tween()
+	_chapter_tween.tween_property(chapter_banner, "modulate:a", 1.0, 0.4)
+	_chapter_tween.tween_interval(3.0)
+	_chapter_tween.tween_property(chapter_banner, "modulate:a", 0.0, 0.6)
+	_chapter_tween.tween_callback(func() -> void: chapter_banner.visible = false)
+
+func _show_level_up(new_level: int) -> void:
+	if not is_instance_valid(popup_container):
+		return
+	var lbl := Label.new()
+	lbl.text = "⭐ NÍVEL %d!" % new_level
+	lbl.horizontal_alignment = 1
+	lbl.add_theme_color_override("font_color", Color(1, 0.85, 0.35))
+	lbl.add_theme_font_size_override("font_size", 34)
+	lbl.add_theme_color_override("font_outline_color", Color(0.05, 0.1, 0.2))
+	lbl.add_theme_constant_override("outline_size", 8)
+	popup_container.add_child(lbl)
+	var tw := create_tween()
+	tw.tween_interval(1.2)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.8)
+	tw.tween_callback(lbl.queue_free)
 
 # --- Touch controls ---
 var lake_position: Vector3 = Vector3(0, 0.15, 12)
@@ -384,19 +720,51 @@ func _create_lake() -> void:
 	var lake := MeshInstance3D.new()
 	var lm := CylinderMesh.new()
 	lm.top_radius = 5.0
-	lm.bottom_radius = 5.0
-	lm.height = 0.3
+	lm.bottom_radius = 4.7
+	lm.height = 0.35
+	lm.radial_segments = 48
 	lake.mesh = lm
 	lake.position = lake_position
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color("28b9bf")
-	mat.emission_enabled = true
-	mat.emission = Color(0.05, 0.25, 0.6)
-	mat.emission_energy_multiplier = 0.5
-	mat.metallic = 0.3
-	mat.roughness = 0.2
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://assets/water.gdshader")
 	lake.material_override = mat
 	add_child(lake)
+
+	# Margem de areia em volta do lago.
+	var margin := MeshInstance3D.new()
+	var mm := TorusMesh.new()
+	mm.inner_radius = 5.0
+	mm.outer_radius = 6.1
+	mm.rings = 40
+	mm.ring_segments = 12
+	margin.mesh = mm
+	margin.position = lake_position + Vector3(0, -0.04, 0)
+	var margin_mat := StandardMaterial3D.new()
+	margin_mat.albedo_color = Color("8f7c5f")
+	margin_mat.roughness = 1.0
+	margin.material_override = margin_mat
+	add_child(margin)
+
+	# Pedras na borda.
+	for i in range(10):
+		var angle := i * TAU / 10.0 + 0.3
+		var radius := 5.5 + scenery_rng.randf_range(-0.25, 0.45)
+		var rock := SphereMesh.new()
+		rock.radius = scenery_rng.randf_range(0.28, 0.55)
+		rock.height = rock.radius * 1.2
+		rock.radial_segments = 7
+		_prop(rock, Color("9a8b74"), lake_position + Vector3(cos(angle) * radius, 0.05, sin(angle) * radius), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+
+	# Vitórias-régias.
+	for i in range(6):
+		var angle := scenery_rng.randf_range(0.0, TAU)
+		var radius := scenery_rng.randf_range(1.0, 3.6)
+		var pad := CylinderMesh.new()
+		pad.top_radius = scenery_rng.randf_range(0.28, 0.5)
+		pad.bottom_radius = pad.top_radius
+		pad.height = 0.04
+		pad.radial_segments = 10
+		_prop(pad, Color("4f9d63"), lake_position + Vector3(cos(angle) * radius, 0.20, sin(angle) * radius))
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact"):
@@ -531,6 +899,7 @@ func _on_interact_pressed() -> void:
 	elif _near_lake():
 		target = "lake"
 		thirst = minf(100.0, thirst + 40.0)
+		Sfx.play("drink")
 		_update_bars()
 		_show_popup("Água potável • +40 hidratação")
 	else:
@@ -550,6 +919,7 @@ func _toggle_pause() -> void:
 	paused = not paused
 	pause_panel.visible = paused
 	get_tree().paused = paused
+	_update_weather_fx(0.0)
 	if paused:
 		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Salvamento automático a cada 10s"
 
@@ -643,9 +1013,13 @@ func _restore_snapshot(snapshot: Dictionary) -> void:
 		items_node.get_child(i).restore_cooldown(cooldowns[i])
 	if not GameManager.mission_list.is_empty():
 		var saved_index: int = int(snapshot.get("mission_index", 0))
-		GameManager.current_mission_index = clampi(saved_index, 0, GameManager.mission_list.size() - 1)
 		GameManager.current_mission_progress = int(snapshot.get("mission_progress", 0))
-		GameManager.missions_complete = saved_index >= GameManager.mission_list.size()
+		if saved_index >= GameManager.mission_list.size():
+			GameManager.current_mission_index = GameManager.mission_list.size()
+			GameManager.missions_complete = true
+		else:
+			GameManager.current_mission_index = clampi(saved_index, 0, GameManager.mission_list.size() - 1)
+			GameManager.missions_complete = false
 	_update_mission()
 	_update_level_ui()
 
@@ -705,6 +1079,15 @@ func _setup_visuals() -> void:
 		background.bg_color = Color("172c3b")
 		background.set_corner_radius_all(5)
 		bars[i].add_theme_stylebox_override("background", background)
+	if is_instance_valid(xp_bar):
+		var xp_fill := StyleBoxFlat.new()
+		xp_fill.bg_color = Color("f2c463")
+		xp_fill.set_corner_radius_all(4)
+		xp_bar.add_theme_stylebox_override("fill", xp_fill)
+		var xp_bg := StyleBoxFlat.new()
+		xp_bg.bg_color = Color("172c3b")
+		xp_bg.set_corner_radius_all(4)
+		xp_bar.add_theme_stylebox_override("background", xp_bg)
 	var panel := StyleBoxFlat.new()
 	panel.bg_color = Color(0.035, 0.08, 0.13, 0.9)
 	panel.set_corner_radius_all(12)
