@@ -2,17 +2,17 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.3.0** — capítulos, nível/EXP, transição suave de biomas e gráficos mais detalhados.
+**Versão do código: 0.3.1** — animais em movimento, nave explorável no solo, lago intransponível e mais detalhes espaciais.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.3.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.0)
+[![Release](https://img.shields.io/badge/release-v0.3.1-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.1)
 
-[⬇️ Baixar Astrofilia.apk (v0.3.0)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.0/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.3.1)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.1/Astrofilia.apk)
 
 ## 📖 História
 
-Um astronauta visita um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, descobre que ela foi destruída — e agora precisa sobreviver aos perigos do planeta: animais, comida venenosa e o clima local.
+Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, encontra o interior vazio e os sistemas desligados — e agora precisa sobreviver aos perigos do planeta: animais, comida venenosa e o clima local.
 
 ## 🌍 Biomas
 
@@ -45,7 +45,11 @@ Um astronauta visita um planeta desconhecido. O capítulo 1 é um tutorial em qu
 - **Fome e sede**: decaimento contínuo influenciado pelo clima, avisos de nível baixo, dano ao chegar a zero e bônus ao comer fruta/carne, beber no lago ou consumir plantas
 - Ciclo dia/noite com sol em órbita, luz da lua, estrelas e clima dinâmico (chuva, neve, tempestade de areia e poeira com partículas próprias)
 - **Biomas com transição suave**: um único terreno com shader mistura deserto, floresta e nevado, sem emendas
+- **Animais em movimento**: as criaturas patrulham ao redor do ponto onde nascem, viram-se para a direção do movimento e não entram no lago nem na nave
+- **Nave explorável**: a nave pousou sobre uma plataforma iluminada no deserto; suba pela rampa para entrar no interior vazio, com console de voo e iluminação própria
+- **Lago intransponível**: a água bloqueia a passagem e só pode ser contornada pelas margens
 - Gráficos detalhados: cactos, cogumelos, arbustos, pinheiros, cristais de gelo, lago com água animada, margem e vitórias-régias
+- **Céu espacial**: planeta gigante com anéis, lua distante, estrelas, sol em órbita e névoa atmosférica
 - Pausa, Game Over e reinício
 - Conquistas e salvamento automático
 - Controles por teclado e touch (joystick virtual + botões)
@@ -137,10 +141,16 @@ XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/as
 
 Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
 
-Teste de capítulos, nível/EXP, clima, relógio e shader do terreno:
+Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave e animais:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-progress-tests godot --headless --path . --log-file /tmp/astrofilia-progress-tests.log --script tests/progression.gd
+```
+
+Teste de colisão real da rampa da nave e do bloqueio do lago:
+
+```bash
+XDG_DATA_HOME=/tmp/astrofilia-ship-tests godot --headless --path . --log-file /tmp/astrofilia-ship-tests.log --script tests/ship_walk.gd
 ```
 
 ## Salvamento e aparência

@@ -127,5 +127,63 @@ func run_checks() -> void:
 	check(ground != null and ground is MeshInstance3D, "single biome ground exists")
 	check(ground.material_override is ShaderMaterial, "biome ground uses the transition shader")
 
+	# Lago intransponível.
+	check(scene.lake_blocker != null and scene.lake_blocker is StaticBody3D, "lake has a solid blocker")
+	check(scene.lake_collider != null and scene.lake_collider.shape is CylinderShape3D, "lake blocker is a cylinder")
+	var lake_shape: CylinderShape3D = scene.lake_collider.shape
+	check(lake_shape.radius >= 5.2 and lake_shape.height >= 3.0, "lake blocker covers the water and cannot be jumped over")
+	check(absf(scene.lake_blocker.position.x - scene.lake_position.x) < 0.01 and absf(scene.lake_blocker.position.z - scene.lake_position.z) < 0.01, "lake blocker is centred on the lake")
+
+	# Nave no chão, com porta, rampa, interior e teto que some para a câmera.
+	check(scene.ship_root != null and scene.ship_root.is_in_group("ship"), "ship exists on the ground")
+	check(absf(scene.ship_root.position.y) < 0.01, "ship sits on the planet floor")
+	check(scene.ship_body != null and scene.ship_body.get_child_count() >= 8, "ship has wall and floor colliders")
+	check(scene.ship_root.get_node_or_null("Ramp") != null and scene.ship_root.get_node_or_null("Ramp/RampBody") != null, "ship has a walkable ramp")
+	check(scene.ship_roof != null and scene.ship_roof.name == "ShipRoof", "ship roof is a separate node")
+	check(not scene._player_inside_ship(), "player starts outside the ship")
+	var old_player_pos: Vector3 = scene.player.global_position
+	scene.player.global_position = scene.ship_position + Vector3(0, 1.4, 0)
+	check(scene._player_inside_ship(), "player can stand inside the ship")
+	scene._update_ship_interior(0.4)
+	scene._update_ship_interior(0.4)
+	check(scene.ship_roof.transparency > 0.4, "ship roof fades out while the player is inside")
+	scene._update_hint()
+	check("Interior da nave" in scene.get_node("CanvasLayer/HUD/HintLabel").text, "hint explains the empty ship interior")
+	scene.player.global_position = scene.ship_position + Vector3(0, 1.0, 12.0)
+	for i in range(8):
+		scene._update_ship_interior(0.4)
+	check(scene.ship_roof.transparency < 0.2, "ship roof becomes solid again after leaving")
+	check(scene._near_ship_door() == false, "ship door hint only appears near the entrance")
+	scene.player.global_position = old_player_pos
+
+	# Animais se movem, voltam para casa e não atravessam o lago.
+	var animals: Array = []
+	for item in scene.items_node.get_children():
+		if item.tipo_item == "animal":
+			animals.append(item)
+	check(animals.size() == 5, "five creatures are spawned")
+	var animal = animals[0]
+	var animal_start: Vector3 = animal.global_position
+	animal.wander_direction = Vector3(1, 0, 0)
+	animal.wander_timer = 10.0
+	animal._process(1.0)
+	check(animal.global_position.x > animal_start.x + 0.1, "creature walks while the game runs")
+	animal.global_position = animal.home_position + Vector3(animal.wander_radius + 2.0, 0, 0)
+	animal.wander_direction = Vector3(1, 0, 0)
+	animal.wander_timer = 10.0
+	animal._process(0.5)
+	var home_distance := Vector2(animal.global_position.x - animal.home_position.x, animal.global_position.z - animal.home_position.z).length()
+	check(home_distance <= animal.wander_radius + 0.05, "creature stays near its home area")
+	animal.global_position = Vector3(scene.lake_position.x - 6.4, animal.home_position.y, scene.lake_position.z)
+	animal.wander_direction = Vector3(1, 0, 0)
+	animal.wander_timer = 10.0
+	for i in range(30):
+		animal._process(0.1)
+	var lake_distance := Vector2(animal.global_position.x - scene.lake_position.x, animal.global_position.z - scene.lake_position.z).length()
+	check(lake_distance >= 6.5, "creature cannot enter the lake")
+	# Devolve a criatura ao ponto inicial para não afetar outros testes.
+	animal.global_position = animal_start
+	animal.wander_direction = Vector3.ZERO
+
 	print("CHECKS COMPLETE: %d failures" % failures.size())
 	quit()

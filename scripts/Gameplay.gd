@@ -76,6 +76,18 @@ var dust_fx: CPUParticles3D
 var stars_instance: MultiMeshInstance3D
 var moon_light: DirectionalLight3D
 
+# Nave, plataforma de pouso e bloqueio do lago.
+var ship_position: Vector3 = Vector3(-24, 0, 5)
+var ship_root: Node3D
+var ship_roof: MeshInstance3D
+var ship_body: StaticBody3D
+var ship_door_position: Vector3
+var ship_inside: bool = false
+var ship_entered: bool = false
+var lake_blocker: StaticBody3D
+var lake_collider: CollisionShape3D
+var sky_features: Node3D
+
 func _ready() -> void:
 	add_to_group("hud")
 	if GameManager.mission_list.is_empty():
@@ -88,6 +100,8 @@ func _ready() -> void:
 	_add_lighting()
 	_create_weather_fx()
 	_create_lake()
+	_create_sky_features()
+	_create_ship()
 	_create_landmarks()
 	_setup_touch()
 	_restore_snapshot(GameManager.pending_snapshot)
@@ -159,6 +173,7 @@ func _process(delta: float) -> void:
 		var target := player.global_position + Vector3(0, 12, 14)
 		camera.global_position = camera.global_position.lerp(target, 1.0 - exp(-8.0 * delta))
 		camera.look_at(player.global_position, Vector3.UP)
+	_update_ship_interior(delta)
 	_update_weather_fx(delta)
 	_update_mission()
 	_check_chapter()
@@ -291,16 +306,24 @@ func _spawn_items() -> void:
 	var types := ["mineral", "fruit", "plant", "crystal", "stone", "animal"]
 	for i in range(30):
 		var it: Node3D = item_scene.instantiate()
+		var idx := i % types.size()
 		var angle := i * TAU / 30.0
 		var radius := 6.0 + (i % 5) * 4.0
-		var pos := Vector3(cos(angle) * radius, 1.0, sin(angle) * radius)
-		# não deixar itens boiando no lago
+		var pos := Vector3(cos(angle) * radius, 1.0 if types[idx] != "animal" else 0.86, sin(angle) * radius)
+		# Não deixar itens boiando no lago.
 		if Vector2(pos.x - lake_position.x, pos.z - lake_position.z).length() < 6.5:
 			pos.z -= 14.0
 			pos.x += 2.0
+		# Nem sobre a plataforma/nave.
+		var ship_offset := Vector2(pos.x - ship_position.x, pos.z - ship_position.z)
+		if ship_offset.length() < 9.0:
+			var away := ship_offset.normalized() if ship_offset.length() > 0.1 else Vector2.RIGHT
+			pos.x = ship_position.x + away.x * 9.0
+			pos.z = ship_position.z + away.y * 9.0
 		it.position = pos
-		var idx := i % types.size()
 		it.tipo_item = types[idx]
+		it.lake_center = lake_position
+		it.ship_center = ship_position
 		it.collected.connect(_on_item_collected)
 		items_node.add_child(it)
 
@@ -367,7 +390,7 @@ func _create_biomes() -> void:
 	_build_snow_props()
 
 	var regions := [
-		{"center": Vector3(-27, 0, 0), "name": "DESERTO ROCHOSO", "label_color": Color("ffe0b0")},
+		{"center": Vector3(-31, 0, -10), "name": "DESERTO ROCHOSO", "label_color": Color("ffe0b0")},
 		{"center": Vector3(0, 0, 0), "name": "FLORESTA", "label_color": Color("c6f5cf")},
 		{"center": Vector3(27, 0, 0), "name": "NEVADO", "label_color": Color("d9f2ff")},
 	]
@@ -386,10 +409,15 @@ func _prop(shape: Mesh, color: Color, pos: Vector3, scale_factor: Vector3 = Vect
 	inst.rotation.y = rot_y
 	return inst
 
+func _near_ship(pos: Vector3, radius: float = 8.5) -> bool:
+	return Vector2(pos.x - ship_position.x, pos.z - ship_position.z).length() < radius
+
 func _build_desert_props() -> void:
 	# Cactos com braços laterais.
 	for i in range(7):
 		var base := Vector3(scenery_rng.randf_range(-38.0, -17.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
+		if _near_ship(base):
+			continue
 		var h := scenery_rng.randf_range(1.5, 2.8)
 		var trunk := CylinderMesh.new()
 		trunk.top_radius = 0.22
@@ -411,7 +439,10 @@ func _build_desert_props() -> void:
 		rock.radius = scenery_rng.randf_range(0.25, 0.9)
 		rock.height = rock.radius * scenery_rng.randf_range(0.9, 1.6)
 		rock.radial_segments = 7
-		_prop(rock, Color("a9614a").lightened(scenery_rng.randf_range(0.0, 0.2)), Vector3(scenery_rng.randf_range(-38.0, -16.0), rock.radius * 0.4, scenery_rng.randf_range(-17.0, 17.0)), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+		var rock_pos := Vector3(scenery_rng.randf_range(-38.0, -16.0), rock.radius * 0.4, scenery_rng.randf_range(-17.0, 17.0))
+		if _near_ship(rock_pos):
+			continue
+		_prop(rock, Color("a9614a").lightened(scenery_rng.randf_range(0.0, 0.2)), rock_pos, Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
 	# Tufos de capim seco.
 	for i in range(26):
 		var tuft := CylinderMesh.new()
@@ -419,7 +450,10 @@ func _build_desert_props() -> void:
 		tuft.bottom_radius = 0.09
 		tuft.height = scenery_rng.randf_range(0.3, 0.7)
 		tuft.radial_segments = 4
-		_prop(tuft, Color("b39a5c"), Vector3(scenery_rng.randf_range(-38.0, -16.0), tuft.height * 0.5, scenery_rng.randf_range(-17.0, 17.0)), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
+		var tuft_pos := Vector3(scenery_rng.randf_range(-38.0, -16.0), tuft.height * 0.5, scenery_rng.randf_range(-17.0, 17.0))
+		if _near_ship(tuft_pos):
+			continue
+		_prop(tuft, Color("b39a5c"), tuft_pos, Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
 
 func _build_forest_props() -> void:
 	# Árvores com copa em camadas (fora do lago).
@@ -766,6 +800,322 @@ func _create_lake() -> void:
 		pad.radial_segments = 10
 		_prop(pad, Color("4f9d63"), lake_position + Vector3(cos(angle) * radius, 0.20, sin(angle) * radius))
 
+	# A água é intransponível: o jogador precisa contornar o lago pelas laterais.
+	lake_blocker = StaticBody3D.new()
+	lake_blocker.name = "LakeBlocker"
+	lake_blocker.add_to_group("lake_blocker")
+	lake_blocker.position = lake_position + Vector3(0, 2.0, 0)
+	lake_collider = CollisionShape3D.new()
+	var blocker_shape := CylinderShape3D.new()
+	blocker_shape.radius = 5.25
+	blocker_shape.height = 6.0
+	lake_collider.shape = blocker_shape
+	lake_blocker.add_child(lake_collider)
+	add_child(lake_blocker)
+
+func _create_sky_features() -> void:
+	# Gigante gasoso com anéis e uma lua distante deixam o céu mais espacial.
+	sky_features = Node3D.new()
+	sky_features.name = "SkyFeatures"
+	add_child(sky_features)
+
+	var planet := MeshInstance3D.new()
+	var planet_mesh := SphereMesh.new()
+	planet_mesh.radius = 26.0
+	planet_mesh.height = 52.0
+	planet_mesh.radial_segments = 64
+	planet_mesh.rings = 32
+	planet.mesh = planet_mesh
+	planet.position = Vector3(-112, 96, -175)
+	var planet_mat := ShaderMaterial.new()
+	planet_mat.shader = load("res://assets/planet_shader.gdshader")
+	planet_mat.set_shader_parameter("noise_scale", 2.6)
+	planet_mat.set_shader_parameter("ocean_color", Color("3d6f9e"))
+	planet_mat.set_shader_parameter("continent_color", Color("9a7f55"))
+	planet_mat.set_shader_parameter("desert_color", Color("c9a06c"))
+	planet_mat.set_shader_parameter("ice_color", Color("e8eef4"))
+	planet.material_override = planet_mat
+	sky_features.add_child(planet)
+
+	var ring := MeshInstance3D.new()
+	var ring_mesh := TorusMesh.new()
+	ring_mesh.inner_radius = 34.0
+	ring_mesh.outer_radius = 50.0
+	ring_mesh.rings = 96
+	ring_mesh.ring_segments = 8
+	ring.mesh = ring_mesh
+	ring.position = planet.position
+	ring.rotation = Vector3(deg_to_rad(74.0), deg_to_rad(12.0), deg_to_rad(-18.0))
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = Color("cdbb9d")
+	ring_mat.roughness = 0.9
+	ring_mat.metallic = 0.1
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.albedo_color.a = 0.72
+	ring.material_override = ring_mat
+	sky_features.add_child(ring)
+
+	var moon := MeshInstance3D.new()
+	var moon_mesh := SphereMesh.new()
+	moon_mesh.radius = 7.0
+	moon_mesh.height = 14.0
+	moon_mesh.radial_segments = 32
+	moon_mesh.rings = 16
+	moon.mesh = moon_mesh
+	moon.position = Vector3(106, 58, -150)
+	var moon_mat := StandardMaterial3D.new()
+	moon_mat.albedo_color = Color("d7dde6")
+	moon_mat.roughness = 1.0
+	moon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	moon.material_override = moon_mat
+	sky_features.add_child(moon)
+
+func _ship_material(color: Color, metallic: float = 0.55, roughness: float = 0.38, emission: Color = Color(0, 0, 0, 0), energy: float = 0.0) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.metallic = metallic
+	material.roughness = roughness
+	if energy > 0.0:
+		material.emission_enabled = true
+		material.emission = emission
+		material.emission_energy_multiplier = energy
+	return material
+
+func _ship_box(size: Vector3) -> BoxMesh:
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	return mesh
+
+func _ship_cylinder(top_radius: float, bottom_radius: float, height: float, segments: int = 24) -> CylinderMesh:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = top_radius
+	mesh.bottom_radius = bottom_radius
+	mesh.height = height
+	mesh.radial_segments = segments
+	return mesh
+
+func _ship_sphere(radius: float, segments: int = 24, rings: int = 12) -> SphereMesh:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = segments
+	mesh.rings = rings
+	return mesh
+
+func _ship_part(parent: Node3D, mesh: Mesh, color: Color, pos: Vector3, scale_factor: Vector3 = Vector3.ONE, rot: Vector3 = Vector3.ZERO, metallic: float = 0.55, roughness: float = 0.38, emission: Color = Color(0, 0, 0, 0), energy: float = 0.0) -> MeshInstance3D:
+	var part := MeshInstance3D.new()
+	part.mesh = mesh
+	part.position = pos
+	part.scale = scale_factor
+	part.rotation = rot
+	part.material_override = _ship_material(color, metallic, roughness, emission, energy)
+	parent.add_child(part)
+	return part
+
+func _ship_glass(parent: Node3D, mesh: Mesh, pos: Vector3, scale_factor: Vector3 = Vector3.ONE, rot: Vector3 = Vector3.ZERO, tint: Color = Color("8ed8f2")) -> MeshInstance3D:
+	var part := MeshInstance3D.new()
+	part.mesh = mesh
+	part.position = pos
+	part.scale = scale_factor
+	part.rotation = rot
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(tint.r, tint.g, tint.b, 0.58)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.metallic = 0.35
+	material.roughness = 0.08
+	material.emission_enabled = true
+	material.emission = tint
+	material.emission_energy_multiplier = 0.55
+	part.material_override = material
+	parent.add_child(part)
+	return part
+
+func _ship_collider(size: Vector3, pos: Vector3, rot: Vector3 = Vector3.ZERO, parent: Node3D = null) -> CollisionShape3D:
+	var collision := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	collision.shape = box
+	collision.position = pos
+	collision.rotation = rot
+	(parent if parent != null else ship_body).add_child(collision)
+	return collision
+
+func _create_ship() -> void:
+	ship_root = Node3D.new()
+	ship_root.name = "Ship"
+	ship_root.position = ship_position
+	ship_root.add_to_group("ship")
+	add_child(ship_root)
+	ship_body = StaticBody3D.new()
+	ship_body.name = "ShipBody"
+	ship_body.add_to_group("ship_body")
+	ship_root.add_child(ship_body)
+	ship_door_position = ship_position + Vector3(0, 1.2, 4.7)
+
+	var hull := Color("cdd7df")
+	var hull_dark := Color("7f929f")
+	var steel := Color("3f4b58")
+	var accent := Color("e8a34b")
+	var glow := Color("7fe3ff")
+
+	# Plataforma de pouso com marcações e luzes.
+	_ship_part(ship_root, _ship_cylinder(7.4, 7.4, 0.08, 64), Color("3c434d"), Vector3(0, 0.04, 0), Vector3.ONE, Vector3.ZERO, 0.2, 0.9)
+	_ship_part(ship_root, _ship_cylinder(7.0, 7.0, 0.03, 64), Color("4b535e"), Vector3(0, 0.085, 0), Vector3.ONE, Vector3.ZERO, 0.35, 0.85)
+	var pad_ring := MeshInstance3D.new()
+	var pad_torus := TorusMesh.new()
+	pad_torus.inner_radius = 6.35
+	pad_torus.outer_radius = 6.85
+	pad_torus.rings = 64
+	pad_torus.ring_segments = 8
+	pad_ring.mesh = pad_torus
+	pad_ring.position = Vector3(0, 0.105, 0)
+	pad_ring.material_override = _ship_material(Color("e9b45b"), 0.3, 0.5, Color("e9b45b"), 0.5)
+	ship_root.add_child(pad_ring)
+	for i in range(8):
+		var angle := i * TAU / 8.0
+		_ship_part(ship_root, _ship_cylinder(0.09, 0.09, 0.12, 10), glow, Vector3(cos(angle) * 6.6, 0.11, sin(angle) * 6.6), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, glow, 1.4)
+
+	# Base e piso da nave (o piso interno fica em y = 0.58).
+	_ship_part(ship_root, _ship_box(Vector3(4.2, 0.18, 8.2)), steel, Vector3(0, 0.20, 0))
+	_ship_part(ship_root, _ship_box(Vector3(4.9, 0.30, 9.0)), hull_dark, Vector3(0, 0.43, 0), Vector3.ONE, Vector3.ZERO, 0.6, 0.4)
+	_ship_part(ship_root, _ship_box(Vector3(4.3, 0.05, 8.7)), Color("2c3440"), Vector3(0, 0.585, 0), Vector3.ONE, Vector3.ZERO, 0.7, 0.45)
+	for x in [-1.8, 1.8]:
+		_ship_part(ship_root, _ship_box(Vector3(0.06, 0.02, 7.6)), glow, Vector3(x, 0.605, 0), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, glow, 0.6)
+
+	# Pernas de pouso com sapatas.
+	for x in [-2.2, 2.2]:
+		for z in [-3.6, 3.6]:
+			_ship_part(ship_root, _ship_cylinder(0.14, 0.18, 0.30, 10), steel, Vector3(x, 0.15, z))
+			_ship_part(ship_root, _ship_box(Vector3(0.78, 0.10, 0.78)), Color("596673"), Vector3(x, 0.05, z), Vector3.ONE, Vector3.ZERO, 0.45, 0.6)
+			_ship_part(ship_root, _ship_box(Vector3(0.12, 0.34, 0.12)), hull_dark, Vector3(x * 0.9, 0.32, z * 0.95), Vector3.ONE, Vector3(x * 0.05, 0, z * 0.04))
+
+	# Casco: paredes laterais, parede traseira e frente com vão de porta.
+	var wall_height := 2.52
+	var wall_y := 1.84
+	_ship_part(ship_root, _ship_box(Vector3(0.30, wall_height, 9.0)), hull, Vector3(-2.35, wall_y, 0), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+	_ship_part(ship_root, _ship_box(Vector3(0.30, wall_height, 9.0)), hull, Vector3(2.35, wall_y, 0), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+	_ship_part(ship_root, _ship_box(Vector3(5.0, wall_height, 0.30)), hull, Vector3(0, wall_y, -4.35), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+	_ship_part(ship_root, _ship_box(Vector3(1.55, wall_height, 0.30)), hull, Vector3(-1.725, wall_y, 4.35), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+	_ship_part(ship_root, _ship_box(Vector3(1.55, wall_height, 0.30)), hull, Vector3(1.725, wall_y, 4.35), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+	_ship_part(ship_root, _ship_box(Vector3(1.9, 0.60, 0.30)), hull, Vector3(0, 2.80, 4.35), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+
+	# Colisores: piso, paredes e vão da porta.
+	_ship_collider(Vector3(4.9, 0.30, 9.0), Vector3(0, 0.43, 0))
+	_ship_collider(Vector3(0.30, wall_height, 9.0), Vector3(-2.35, wall_y, 0))
+	_ship_collider(Vector3(0.30, wall_height, 9.0), Vector3(2.35, wall_y, 0))
+	_ship_collider(Vector3(5.0, wall_height, 0.30), Vector3(0, wall_y, -4.35))
+	_ship_collider(Vector3(1.55, wall_height, 0.30), Vector3(-1.725, wall_y, 4.35))
+	_ship_collider(Vector3(1.55, wall_height, 0.30), Vector3(1.725, wall_y, 4.35))
+	_ship_collider(Vector3(1.9, 0.60, 0.30), Vector3(0, 2.80, 4.35))
+	_ship_collider(Vector3(3.8, 1.8, 2.6), Vector3(0, 1.55, -5.5))
+
+	# Teto separado para a câmera enxergar o interior.
+	ship_roof = _ship_part(ship_root, _ship_box(Vector3(5.0, 0.22, 9.0)), hull, Vector3(0, 3.22, 0), Vector3.ONE, Vector3.ZERO, 0.65, 0.32)
+	ship_roof.name = "ShipRoof"
+	ship_roof.transparency = 0.0
+	for x in [-2.15, 2.15]:
+		_ship_part(ship_root, _ship_box(Vector3(0.34, 0.12, 9.0)), hull_dark, Vector3(x, 3.36, 0), Vector3.ONE, Vector3.ZERO, 0.6, 0.42)
+	for z in [-2.6, 0.0, 2.6]:
+		_ship_part(ship_root, _ship_box(Vector3(1.7, 0.045, 0.16)), accent, Vector3(0, 3.345, z), Vector3.ONE, Vector3.ZERO, 0.4, 0.45, accent, 0.25)
+
+	# Detalhes externos: painéis, nervuras e janelas.
+	for x in [-2.52, 2.52]:
+		_ship_part(ship_root, _ship_box(Vector3(0.07, 0.82, 7.4)), Color("aebdc8"), Vector3(x, 1.20, 0), Vector3.ONE, Vector3.ZERO, 0.7, 0.3)
+		for z in [-3.9, -1.25, 1.25, 3.9]:
+			_ship_part(ship_root, _ship_box(Vector3(0.12, 2.35, 0.12)), hull_dark, Vector3(x * 1.015, 1.82, z), Vector3.ONE, Vector3.ZERO, 0.6, 0.42)
+	for side in [-1.0, 1.0]:
+		for z in [-2.45, 0.05, 2.45]:
+			_ship_part(ship_root, _ship_box(Vector3(0.08, 0.70, 0.94)), steel, Vector3(side * 2.534, 2.35, z), Vector3.ONE, Vector3.ZERO, 0.55, 0.4)
+			_ship_glass(ship_root, _ship_box(Vector3(0.055, 0.56, 0.78)), Vector3(side * 2.572, 2.35, z), Vector3.ONE, Vector3.ZERO, Color("86d9f4"))
+
+	# Nariz cônico, cabine e luz de proa.
+	var collar := TorusMesh.new()
+	collar.inner_radius = 2.16
+	collar.outer_radius = 2.38
+	collar.rings = 40
+	collar.ring_segments = 8
+	_ship_part(ship_root, collar, steel, Vector3(0, 1.84, -4.58), Vector3(1.0, 1.0, 0.46), Vector3(deg_to_rad(90), 0, 0), 0.7, 0.35)
+	var nose := _ship_part(ship_root, _ship_cylinder(0.0, 2.30, 2.5, 32), hull, Vector3(0, 1.84, -5.85), Vector3(1.0, 1.0, 0.46), Vector3(deg_to_rad(-90), 0, 0), 0.62, 0.34)
+	nose.name = "NoseCone"
+	_ship_part(ship_root, _ship_cylinder(1.36, 1.48, 0.18, 32), steel, Vector3(0, 3.04, -3.55))
+	_ship_glass(ship_root, _ship_sphere(1.0, 32, 16), Vector3(0, 3.12, -3.55), Vector3(1.02, 0.62, 1.55), Vector3.ZERO, Color("77c8e8"))
+	for x in [-0.52, 0.0, 0.52]:
+		_ship_part(ship_root, _ship_box(Vector3(0.055, 0.06, 2.7)), steel, Vector3(x, 3.46, -3.55), Vector3.ONE, Vector3.ZERO, 0.7, 0.3)
+	_ship_part(ship_root, _ship_sphere(0.13, 12, 6), Color("ffd27f"), Vector3(0, 1.55, -7.0), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("ffd27f"), 2.0)
+
+	# Motores laranja/azuis ladeando a porta.
+	for x in [-2.72, 2.72]:
+		_ship_part(ship_root, _ship_cylinder(0.46, 0.46, 1.9, 20), steel, Vector3(x, 1.02, 3.35), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.8, 0.25)
+		_ship_part(ship_root, _ship_box(Vector3(0.55, 0.25, 1.25)), hull_dark, Vector3(x * 0.87, 1.02, 3.35), Vector3.ONE, Vector3.ZERO, 0.65, 0.4)
+		_ship_part(ship_root, _ship_cylinder(0.52, 0.34, 0.38, 20), Color("2a3038"), Vector3(x, 1.02, 4.42), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.7, 0.35)
+		_ship_part(ship_root, _ship_cylinder(0.34, 0.34, 0.04, 20), glow, Vector3(x, 1.02, 4.62), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.2, 0.2, glow, 2.2)
+		var exhaust := OmniLight3D.new()
+		exhaust.light_color = Color("70d8ff")
+		exhaust.light_energy = 0.7
+		exhaust.omni_range = 4.0
+		exhaust.position = Vector3(x, 1.02, 4.75)
+		ship_root.add_child(exhaust)
+
+	# Antena lateral, luz de sinalização e nome da nave.
+	_ship_part(ship_root, _ship_cylinder(0.04, 0.06, 1.7, 8), steel, Vector3(-2.55, 3.35, 2.0))
+	_ship_part(ship_root, _ship_cylinder(0.46, 0.34, 0.08, 16), Color("b7c4cf"), Vector3(-2.55, 4.2, 2.0), Vector3.ONE, Vector3(deg_to_rad(28), 0, 0), 0.7, 0.3)
+	_ship_part(ship_root, _ship_sphere(0.09, 10, 5), Color("ff6b5f"), Vector3(-2.55, 4.25, 2.0), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("ff6b5f"), 2.0)
+	var ship_label := Label3D.new()
+	ship_label.text = "NAVE"
+	ship_label.position = Vector3(0, 4.35, 0)
+	ship_label.font_size = 64
+	ship_label.outline_size = 14
+	ship_label.modulate = Color("e9f6ff")
+	ship_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	ship_root.add_child(ship_label)
+
+	# Rampa caminhável (ângulo de ~8°, abaixo do limite de 45° do jogador).
+	var ramp_root := Node3D.new()
+	ramp_root.name = "Ramp"
+	ramp_root.position = Vector3(0, 0.245, 6.5)
+	ramp_root.rotation.x = atan(0.53 / 3.9)
+	ship_root.add_child(ramp_root)
+	_ship_part(ramp_root, _ship_box(Vector3(1.9, 0.14, 3.98)), hull_dark, Vector3.ZERO, Vector3.ONE, Vector3.ZERO, 0.6, 0.42)
+	_ship_part(ramp_root, _ship_box(Vector3(1.72, 0.02, 3.80)), Color("8b9ba7"), Vector3(0, 0.075, 0), Vector3.ONE, Vector3.ZERO, 0.55, 0.45)
+	for i in range(6):
+		_ship_part(ramp_root, _ship_box(Vector3(1.68, 0.025, 0.07)), accent, Vector3(0, 0.09, -1.62 + i * 0.65), Vector3.ONE, Vector3.ZERO, 0.3, 0.5)
+	for x in [-0.98, 0.98]:
+		_ship_part(ramp_root, _ship_box(Vector3(0.07, 0.20, 3.98)), steel, Vector3(x, 0.15, 0), Vector3.ONE, Vector3.ZERO, 0.6, 0.4)
+	var ramp_body := StaticBody3D.new()
+	ramp_body.name = "RampBody"
+	ramp_root.add_child(ramp_body)
+	_ship_collider(Vector3(1.9, 0.14, 3.98), Vector3.ZERO, Vector3.ZERO, ramp_body)
+
+	# Porta aberta, dobradiça e moldura iluminada.
+	for x in [-1.0, 1.0]:
+		_ship_part(ship_root, _ship_box(Vector3(0.16, 2.18, 0.16)), steel, Vector3(x, 1.63, 4.50), Vector3.ONE, Vector3.ZERO, 0.7, 0.32)
+		_ship_part(ship_root, _ship_box(Vector3(0.04, 2.0, 0.05)), glow, Vector3(x * 0.97, 1.63, 4.60), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, glow, 1.1)
+	_ship_part(ship_root, _ship_box(Vector3(2.16, 0.16, 0.16)), steel, Vector3(0, 2.66, 4.50), Vector3.ONE, Vector3.ZERO, 0.7, 0.32)
+	_ship_part(ship_root, _ship_box(Vector3(1.9, 0.04, 0.08)), glow, Vector3(0, 2.57, 4.61), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, glow, 1.0)
+	var door_hinge := Node3D.new()
+	door_hinge.position = Vector3(1.0, 1.60, 4.60)
+	door_hinge.rotation.y = deg_to_rad(105.0)
+	ship_root.add_child(door_hinge)
+	_ship_part(door_hinge, _ship_box(Vector3(1.72, 2.0, 0.12)), hull, Vector3(-0.86, 0, 0), Vector3.ONE, Vector3.ZERO, 0.6, 0.35)
+	_ship_glass(door_hinge, _ship_box(Vector3(0.62, 0.62, 0.05)), Vector3(-0.86, 0.28, 0.075), Vector3.ONE, Vector3.ZERO, Color("8ed8f2"))
+
+	# Interior vazio, com console de voo e iluminação.
+	var console := _ship_part(ship_root, _ship_box(Vector3(2.4, 0.85, 0.55)), steel, Vector3(0, 1.0, -3.95))
+	console.name = "Console"
+	_ship_part(ship_root, _ship_box(Vector3(2.28, 0.10, 0.78)), Color("596673"), Vector3(0, 1.43, -3.85), Vector3.ONE, Vector3(deg_to_rad(-16), 0, 0), 0.65, 0.35)
+	_ship_part(ship_root, _ship_box(Vector3(1.65, 0.44, 0.05)), Color("49d8c4"), Vector3(0, 1.86, -3.78), Vector3.ONE, Vector3(deg_to_rad(-8), 0, 0), 0.2, 0.2, Color("49d8c4"), 1.3)
+	for x in [-0.85, 0.85]:
+		_ship_part(ship_root, _ship_box(Vector3(0.05, 0.05, 0.05)), Color("ffb45c"), Vector3(x, 2.10, -3.73), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("ffb45c"), 1.4)
+	var cabin_light := OmniLight3D.new()
+	cabin_light.light_color = Color("cfe6ff")
+	cabin_light.light_energy = 1.1
+	cabin_light.omni_range = 7.0
+	cabin_light.position = Vector3(0, 2.65, -0.4)
+	ship_root.add_child(cabin_light)
+	for z in [-2.2, 1.4]:
+		_ship_part(ship_root, _ship_box(Vector3(1.5, 0.035, 0.22)), Color("bdefff"), Vector3(0, 3.08, z), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("bdefff"), 1.6)
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact"):
 		_on_interact_pressed()
@@ -786,6 +1136,30 @@ func _near_lake() -> bool:
 	var offset := player.global_position - lake_position
 	return Vector2(offset.x, offset.z).length() <= 6.5
 
+func _near_ship_door() -> bool:
+	return player.global_position.distance_to(ship_door_position) <= 4.2
+
+func _player_inside_ship() -> bool:
+	if not is_instance_valid(ship_root) or not player:
+		return false
+	var local := player.global_position - ship_position
+	return absf(local.x) < 2.15 and local.z > -4.2 and local.z < 4.55 and local.y > 0.45 and local.y < 3.2
+
+func _update_ship_interior(delta: float) -> void:
+	if not is_instance_valid(ship_roof):
+		return
+	ship_inside = _player_inside_ship()
+	var target := 0.82 if ship_inside else 0.0
+	ship_roof.transparency = move_toward(ship_roof.transparency, target, delta * 2.8)
+	if ship_inside and not ship_entered:
+		ship_entered = true
+		Sfx.play("click")
+		_show_popup("🚀 Interior da nave • vazia por enquanto")
+	elif not ship_inside and ship_entered:
+		var local := player.global_position - ship_position
+		if Vector2(local.x, local.z).length() > 6.0:
+			ship_entered = false
+
 func _should_use_lake(mission: Dictionary, item: Node3D) -> bool:
 	return _near_lake() and (item == null or mission.get("target", "") == "lake" or (thirst < 100.0 and mission.get("action", "") != "interact"))
 
@@ -793,13 +1167,17 @@ func _update_hint() -> void:
 	var item: Node3D = _nearest_item()
 	var mission: Dictionary = GameManager.get_current_mission()
 	var hint := "Explore os biomas • Encontre recursos e o lago turquesa"
-	if _should_use_lake(mission, item):
+	if ship_inside:
+		hint = "🚀 Interior da nave • vazia por enquanto • saia pela rampa"
+	elif _should_use_lake(mission, item):
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif item:
 		var verb: String = "Analisar" if mission.get("action", "") == "interact" else "Coletar"
 		hint = "E / AÇÃO • %s %s" % [verb, item.display_name()]
 	elif _near_lake():
 		hint = "E / AÇÃO • Beber água / analisar o lago"
+	elif _near_ship_door():
+		hint = "🚀 Suba a rampa para entrar na nave"
 	$CanvasLayer/HUD/HintLabel.text = hint
 
 var touch_left := false

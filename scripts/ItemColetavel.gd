@@ -6,9 +6,21 @@ signal collected(type: String)
 @export var quantidade: int = 1
 @export var mensagem_coleta: String = "Coletado!"
 
+# Movimento das criaturas: cada animal patrulha uma pequena área ao redor do
+# ponto onde nasceu, sem entrar no lago nem na nave.
+@export var move_speed: float = 0.9
+@export var wander_radius: float = 3.4
+@export var lake_center: Vector3 = Vector3(0, 0.15, 12)
+@export var ship_center: Vector3 = Vector3(-24, 0, 5)
+
 var available := true
 var visual: Node3D
 var respawn_timer: Timer
+var home_position := Vector3.ZERO
+var wander_direction := Vector3.ZERO
+var wander_timer := 0.0
+var hop_phase := 0.0
+var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	$MeshInstance3D.hide()
@@ -18,8 +30,96 @@ func _ready() -> void:
 	_build_visual()
 	respawn_timer = Timer.new()
 	respawn_timer.one_shot = true
-	respawn_timer.timeout.connect(func(): available = true; visual.show())
+	respawn_timer.timeout.connect(_respawn)
 	add_child(respawn_timer)
+	_rng.randomize()
+	home_position = position
+	if tipo_item == "animal":
+		_pick_wander_direction()
+	else:
+		set_process(false)
+
+func _process(delta: float) -> void:
+	if tipo_item != "animal" or not available:
+		return
+	wander_timer -= delta
+	if wander_timer <= 0.0:
+		_pick_wander_direction()
+	if wander_direction.length_squared() <= 0.001:
+		hop_phase = 0.0
+		visual.position.y = move_toward(visual.position.y, 0.0, delta * 0.6)
+		return
+	var next := global_position + wander_direction * move_speed * delta
+	var steer := _steer_away(next)
+	if steer.length_squared() > 0.0:
+		next += steer * delta * 2.2
+	var clamped := _keep_out(next)
+	if not clamped.is_equal_approx(next):
+		wander_direction = -wander_direction
+		wander_timer = minf(wander_timer, 1.2)
+	next = clamped
+	# Mantém a criatura perto do ponto de origem.
+	var from_home := Vector2(next.x - home_position.x, next.z - home_position.z)
+	if from_home.length() > wander_radius:
+		from_home = from_home.normalized() * wander_radius
+		next.x = home_position.x + from_home.x
+		next.z = home_position.z + from_home.y
+		wander_direction = Vector3(-from_home.normalized().x, 0.0, -from_home.normalized().y)
+		wander_timer = minf(wander_timer, 0.8)
+	# Limites do terreno.
+	next.x = clampf(next.x, -42.0, 42.0)
+	next.z = clampf(next.z, -42.0, 42.0)
+	global_position = Vector3(next.x, home_position.y, next.z)
+	visual.rotation.y = lerp_angle(visual.rotation.y, atan2(wander_direction.x, wander_direction.z), clampf(delta * 7.0, 0.0, 1.0))
+	hop_phase += delta * 10.0
+	visual.position.y = absf(sin(hop_phase)) * 0.075
+
+func _pick_wander_direction() -> void:
+	wander_timer = _rng.randf_range(1.4, 3.8)
+	if _rng.randf() < 0.18:
+		wander_direction = Vector3.ZERO
+	else:
+		var angle := _rng.randf_range(0.0, TAU)
+		wander_direction = Vector3(cos(angle), 0.0, sin(angle))
+
+func _steer_away(point: Vector3) -> Vector3:
+	var push := Vector3.ZERO
+	var lake_offset := Vector2(point.x - lake_center.x, point.z - lake_center.z)
+	if lake_offset.length() < 6.8:
+		var fallback := Vector3(_rng.randf_range(-1.0, 1.0), 0.0, _rng.randf_range(-1.0, 1.0))
+		if lake_offset.length() < 0.05:
+			push += fallback.normalized()
+		else:
+			push += Vector3(lake_offset.x, 0.0, lake_offset.y).normalized() * (6.8 - lake_offset.length())
+	var ship_offset := Vector2(point.x - ship_center.x, point.z - ship_center.z)
+	if ship_offset.length() < 7.4:
+		var fallback := Vector3(_rng.randf_range(-1.0, 1.0), 0.0, _rng.randf_range(-1.0, 1.0))
+		if ship_offset.length() < 0.05:
+			push += fallback.normalized()
+		else:
+			push += Vector3(ship_offset.x, 0.0, ship_offset.y).normalized() * (7.4 - ship_offset.length())
+	return push
+
+func _keep_out(point: Vector3) -> Vector3:
+	# Barreira rígida: nenhuma criatura entra na água ou na plataforma da nave.
+	for zone in [[lake_center, 6.6], [ship_center, 7.6]]:
+		var center: Vector3 = zone[0]
+		var radius: float = zone[1]
+		var offset := Vector2(point.x - center.x, point.z - center.z)
+		if offset.length() < radius:
+			var fallback := Vector2(1, 0) if offset.length() < 0.01 else offset.normalized()
+			point.x = center.x + fallback.x * radius
+			point.z = center.z + fallback.y * radius
+	return point
+
+func _respawn() -> void:
+	available = true
+	if tipo_item == "animal":
+		global_position = home_position
+		visual.position.y = 0.0
+		wander_direction = Vector3.ZERO
+		wander_timer = 0.0
+	visual.show()
 
 func display_name() -> String:
 	return {"mineral": "minério", "fruit": "fruta", "plant": "planta", "crystal": "cristal", "stone": "pedra", "animal": "criatura"}.get(tipo_item, tipo_item)
