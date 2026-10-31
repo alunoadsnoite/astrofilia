@@ -2,13 +2,13 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.3.2** — desfecho narrativo ao reativar o console da nave, além de animais em movimento, nave explorável no solo, lago intransponível e mais detalhes espaciais.
+**Versão do código: 0.3.3** — limite de gravidade no planeta, introdução com o planeta girando e desfecho narrativo ao reativar o console da nave.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.3.2-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.2)
+[![Release](https://img.shields.io/badge/release-v0.3.3-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.3)
 
-[⬇️ Baixar Astrofilia.apk (v0.3.2)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.2/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.3.3)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.3/Astrofilia.apk)
 
 ## 📖 História
 
@@ -34,7 +34,7 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 
 ## ✨ Funcionalidades
 
-- Cutscene inicial: foguete partindo com aplausos, nave pousando e astronauta descendo
+- Introdução: o planeta gira lentamente sob as estrelas, sem astronauta caindo no vazio
 - Caixa de texto vermelha no topo com missões sequenciais (8 do Coletor + 8 do Biólogo)
 - Missões alternadas no singleplayer e por função no multiplayer
 - Missão final: "Virem juntos para casa! Ativem o console da nave" / "Volte para casa! Ative o console da nave"
@@ -47,6 +47,7 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - Ciclo dia/noite com sol em órbita, luz da lua, estrelas e clima dinâmico (chuva, neve, tempestade de areia e poeira com partículas próprias)
 - **Biomas com transição suave**: um único terreno com shader mistura deserto, floresta e nevado, sem emendas
 - **Animais em movimento**: as criaturas patrulham ao redor do ponto onde nascem, viram-se para a direção do movimento e não entram no lago nem na nave
+- **Limite de gravidade**: paredes invisíveis contornam a área jogável e, se o astronauta escapar, a gravidade do planeta o traz de volta
 - **Nave explorável**: a nave pousou sobre uma plataforma iluminada no deserto; suba pela rampa para entrar no interior, com console de voo e iluminação própria — o console só responde quando todas as missões forem concluídas
 - **Lago intransponível**: a água bloqueia a passagem e só pode ser contornada pelas margens
 - Gráficos detalhados: cactos, cogumelos, arbustos, pinheiros, cristais de gelo, lago com água animada, margem e vitórias-régias
@@ -132,6 +133,7 @@ MIT — veja [LICENSE](LICENSE).
 - Fome e sede diminuem continuamente; o clima altera a velocidade da sede. Frutas (+20 fome, +6 sede), carne (+25 fome) e plantas (+8 sede) ajudam a sobreviver. Abaixo de 25% a HUD avisa e tinge o medidor.
 - A cada capítulo avançado aparece um painel central por 3 segundos e o jogador ganha 50 EXP.
 - Com todas as missões concluídas, o console da nave fica ativo. Aproxime-se e pressione **E / AÇÃO** para iniciar o desfecho; a tela final resume a jornada e permite continuar explorando.
+- O astronauta não cai mais no vazio: a área do planeta tem limites invisíveis e qualquer queda é revertida para o último ponto firme.
 - EXP é ganha ao coletar (+10), analisar (+5), concluir missão (+25) e avançar capítulo (+50). Ao subir de nível, vida/fome/sede são parcialmente restauradas.
 - Controles de toque aparecem em dispositivos com tela sensível ao toque.
 
@@ -143,7 +145,7 @@ XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/as
 
 Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
 
-Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais e desfecho:
+Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais, limite do planeta e desfecho:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-progress-tests godot --headless --path . --log-file /tmp/astrofilia-progress-tests.log --script tests/progression.gd

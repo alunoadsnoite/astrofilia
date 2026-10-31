@@ -105,6 +105,23 @@ func run_checks() -> void:
 	manager.missions_complete = false
 	scene.player.global_position = ending_return_pos
 
+	# Limite do planeta: paredes invisíveis e recuperação da gravidade.
+	check(scene.boundary_body != null and scene.boundary_body.get_child_count() == 4, "planet boundary has four invisible walls")
+	var boundary_ok := true
+	for wall in scene.boundary_body.get_children():
+		if not (wall is CollisionShape3D and wall.shape is BoxShape3D):
+			boundary_ok = false
+	check(boundary_ok, "planet boundary uses box colliders")
+	scene.last_safe_position = Vector3(6, 1, 6)
+	scene.player.global_position = Vector3(6, -12, 6)
+	scene._update_planet_bounds()
+	check(scene.player.global_position.y > 0.0, "astronaut is pulled back before falling into the void")
+	scene.last_safe_position = Vector3(6, 1, 6)
+	scene.player.global_position = Vector3(80, 1, 0)
+	scene._update_planet_bounds()
+	check(absf(scene.player.global_position.x) <= 43.6, "astronaut cannot stay outside the planet area")
+	scene.player.global_position = ending_return_pos
+
 	# HUD de sobrevivência com porcentagem.
 	scene.hunger = 53.4
 	scene.thirst = 20.0

@@ -52,6 +52,13 @@ func _ready() -> void:
 	astronaut.material_override = astro_mat
 	# Estrelas de fundo
 	_add_stars()
+	# O astronauta e a nave pertencem ao jogo; a introdução mostra apenas
+	# o planeta girando, sem ninguém caindo no vazio.
+	rocket.visible = false
+	ship.visible = false
+	astronaut.visible = false
+	camera.position = Vector3(0, 26, 118)
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	await _play_cutscene()
 
 func _build_rocket_details(mat: StandardMaterial3D) -> void:
@@ -130,11 +137,11 @@ func _add_continents() -> void:
 
 func _add_stars() -> void:
 	var particles := CPUParticles3D.new()
-	particles.amount = 400
+	particles.amount = 700
 	particles.lifetime = 8.0
 	particles.preprocess = 4.0
 	particles.emission_shape = 2
-	particles.emission_box_extents = Vector3(80, 50, 80)
+	particles.emission_box_extents = Vector3(220, 140, 220)
 	particles.gravity = Vector3.ZERO
 	particles.initial_velocity_min = 0.0
 	particles.initial_velocity_max = 0.0
@@ -144,36 +151,21 @@ func _add_stars() -> void:
 	add_child(particles)
 
 func _play_cutscene() -> void:
-	# Fase 1: foguete parte com aplausos
-	applause_label.visible = true
-	var tw := create_tween()
-	tw.tween_property(rocket, "position:y", 60.0, 2.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(rocket, "position:z", 0.0, 2.5)
-	await tw.finished
-	applause_label.visible = false
-	await get_tree().create_timer(0.5).timeout
+	# Apenas o cenário do planeta gira, com uma rotação lenta e contínua.
+	planet.rotation = Vector3(0.12, 0.0, 0.0)
+	var turn := create_tween()
+	turn.set_loops()
+	turn.tween_property(planet, "rotation:y", TAU, 60.0).from(0.0).set_trans(Tween.TRANS_LINEAR)
 
-	# Fase 2: nave pousa no planeta
-	ship.visible = true
-	ship.position = Vector3(0, 30, 0)
-	var tw2 := create_tween()
-	tw2.tween_property(ship, "position:y", 6.0, 2.0).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
-	await tw2.finished
-	await get_tree().create_timer(0.5).timeout
-
-	# Astronauta desce
-	astronaut.visible = true
-	astronaut.position = Vector3(0, 6.0, 0)
-	var tw3 := create_tween()
-	tw3.tween_property(astronaut, "position:y", 0.5, 1.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
-	await tw3.finished
-	await get_tree().create_timer(0.5).timeout
-
-	# Fase 3: preparar missões e ir para o gameplay
-	GameManager.build_mission_list()
 	mission_panel.visible = true
+	mission_label.text = "ASTROFILIA"
+	await get_tree().create_timer(2.0).timeout
+	mission_label.text = "Um planeta desconhecido gira silencioso sob as estrelas..."
+	await get_tree().create_timer(2.8).timeout
+
+	GameManager.build_mission_list()
 	mission_label.text = "Pegue suas ferramentas e siga as missões!"
-	await get_tree().create_timer(2.5).timeout
+	await get_tree().create_timer(2.2).timeout
 	# A nave perde energia e o jogador precisa reativar o console.
 	mission_label.text = "⚠ A nave perdeu energia... ⚠"
 	await get_tree().create_timer(1.8).timeout

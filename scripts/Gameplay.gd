@@ -85,6 +85,12 @@ var moon_light: DirectionalLight3D
 
 # Nave, plataforma de pouso e bloqueio do lago.
 var ship_position: Vector3 = Vector3(-24, 0, 5)
+# A área jogável termina junto ao cenário do planeta. Paredes invisíveis e
+# uma recuperação de gravidade impedem que o astronauta caia no vazio.
+const WORLD_LIMIT := 43.5
+const VOID_Y := -3.0
+var boundary_body: StaticBody3D
+var last_safe_position: Vector3 = Vector3(0, 1.0, 0)
 var ship_root: Node3D
 var ship_roof: MeshInstance3D
 var ship_body: StaticBody3D
@@ -105,6 +111,7 @@ func _ready() -> void:
 	_setup_visuals()
 	_spawn_items()
 	_create_biomes()
+	_create_boundary()
 	_add_lighting()
 	_create_weather_fx()
 	_create_lake()
@@ -185,6 +192,7 @@ func _process(delta: float) -> void:
 		camera.global_position = camera.global_position.lerp(target, 1.0 - exp(-8.0 * delta))
 		camera.look_at(player.global_position, Vector3.UP)
 	_update_ship_interior(delta)
+	_update_planet_bounds()
 	_update_weather_fx(delta)
 	_update_mission()
 	_check_chapter()
@@ -382,6 +390,35 @@ func _show_popup(text: String) -> void:
 # Terreno único que cobre as três regiões. O shader mistura deserto, floresta
 # e nevado com ruído e transições suaves, sem emendas visíveis e sem
 # z-fighting (fica 2 cm acima do piso, que continua sendo o único colisor).
+func _create_boundary() -> void:
+	boundary_body = StaticBody3D.new()
+	boundary_body.name = "PlanetBoundary"
+	boundary_body.add_to_group("planet_boundary")
+	add_child(boundary_body)
+	var wall_height := 14.0
+	var thickness := 2.0
+	for i in range(4):
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(WORLD_LIMIT * 2.0 + thickness * 2.0, wall_height, thickness)
+		var collision := CollisionShape3D.new()
+		collision.shape = shape
+		var angle := i * PI * 0.5
+		collision.position = Vector3(sin(angle) * (WORLD_LIMIT + thickness * 0.5), wall_height * 0.5, cos(angle) * (WORLD_LIMIT + thickness * 0.5))
+		collision.rotation.y = angle
+		boundary_body.add_child(collision)
+
+func _update_planet_bounds() -> void:
+	if not is_instance_valid(player):
+		return
+	var pos := player.global_position
+	# Guarda o último ponto firme para devolver o astronauta se algo der errado.
+	if player.is_on_floor() and pos.y > 0.0 and absf(pos.x) < WORLD_LIMIT and absf(pos.z) < WORLD_LIMIT:
+		last_safe_position = pos
+	if pos.y < VOID_Y or absf(pos.x) > WORLD_LIMIT + 4.0 or absf(pos.z) > WORLD_LIMIT + 4.0:
+		player.global_position = last_safe_position + Vector3(0, 0.6, 0)
+		player.velocity = Vector3.ZERO
+		_show_popup("🧲 A gravidade do planeta trouxe você de volta")
+
 func _create_biomes() -> void:
 	var ground := MeshInstance3D.new()
 	ground.name = "BiomeGround"
