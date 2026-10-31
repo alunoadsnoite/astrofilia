@@ -31,6 +31,13 @@ extends Node3D
 @onready var jump_button: Button = $CanvasLayer/TouchControls/JumpButton
 @onready var interact_button: Button = $CanvasLayer/TouchControls/InteractButton
 @onready var pause_button: Button = $CanvasLayer/HUD/PauseButton
+@onready var ending_overlay: ColorRect = $CanvasLayer/EndingOverlay
+@onready var ending_panel: Panel = $CanvasLayer/EndingPanel
+@onready var ending_title: Label = $CanvasLayer/EndingPanel/EndingMargin/EndingVBox/EndingTitle
+@onready var ending_subtitle: Label = $CanvasLayer/EndingPanel/EndingMargin/EndingVBox/EndingSubtitle
+@onready var ending_stats: Label = $CanvasLayer/EndingPanel/EndingMargin/EndingVBox/EndingStats
+@onready var ending_continue_button: Button = $CanvasLayer/EndingPanel/EndingMargin/EndingVBox/EndingContinueButton
+@onready var ending_menu_button: Button = $CanvasLayer/EndingPanel/EndingMargin/EndingVBox/EndingMenuButton
 
 var item_scene := preload("res://scenes/Item.tscn")
 
@@ -84,6 +91,7 @@ var ship_body: StaticBody3D
 var ship_door_position: Vector3
 var ship_inside: bool = false
 var ship_entered: bool = false
+var ending_started: bool = false
 var lake_blocker: StaticBody3D
 var lake_collider: CollisionShape3D
 var sky_features: Node3D
@@ -130,6 +138,9 @@ func _ready() -> void:
 	$CanvasLayer/GameOverPanel/GameOverVBox/RestartButton.pressed.connect(_restart)
 	jump_button.pressed.connect(_on_jump_pressed)
 	interact_button.pressed.connect(_on_interact_pressed)
+	ending_continue_button.pressed.connect(_close_ending)
+	ending_menu_button.pressed.connect(_ending_to_menu)
+	_refresh_ending_texts()
 	get_tree().auto_accept_quit = false
 	if GameManager.active_slot >= 0:
 		_autosave()
@@ -1139,6 +1150,61 @@ func _near_lake() -> bool:
 func _near_ship_door() -> bool:
 	return player.global_position.distance_to(ship_door_position) <= 4.2
 
+func _near_ship_console() -> bool:
+	if not _player_inside_ship():
+		return false
+	var console_position := ship_position + Vector3(0, 1.2, -3.85)
+	return player.global_position.distance_to(console_position) <= 2.8
+
+func _refresh_ending_texts() -> void:
+	ending_title.text = GameManager.t("ending_title")
+	ending_subtitle.text = GameManager.t("ending_subtitle")
+	ending_continue_button.text = GameManager.t("ending_continue")
+	ending_menu_button.text = GameManager.t("ending_menu")
+
+func _start_ending() -> void:
+	if ending_started or not GameManager.missions_complete:
+		return
+	ending_started = true
+	paused = true
+	player.external_move = Vector2.ZERO
+	player.set_physics_process(false)
+	_clear_touch()
+	touch_controls.visible = false
+	GameManager.add_achievement("Voltou para casa")
+	_save_progress()
+	Sfx.play("chapter")
+	_refresh_ending_texts()
+	var resource_total := 0
+	for amount in inventory.values():
+		resource_total += int(amount)
+	ending_stats.text = "%s: %s\n%s %d  •  %s %d\n%s: %d  •  %s: %d/%d" % [
+		GameManager.t("username"), GameManager.player_name,
+		GameManager.t("ending_level"), GameManager.level,
+		GameManager.t("ending_score"), score,
+		GameManager.t("ending_resources"), resource_total,
+		GameManager.t("ending_missions"), GameManager.mission_list.size(), GameManager.mission_list.size(),
+	]
+	ending_overlay.visible = true
+	ending_overlay.modulate.a = 0.0
+	ending_panel.visible = true
+	ending_panel.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(ending_overlay, "modulate:a", 1.0, 0.7)
+	tween.parallel().tween_property(ending_panel, "modulate:a", 1.0, 0.9).set_delay(0.4)
+
+func _close_ending() -> void:
+	ending_overlay.visible = false
+	ending_panel.visible = false
+	ending_started = false
+	paused = false
+	player.set_physics_process(true)
+	touch_controls.visible = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
+
+func _ending_to_menu() -> void:
+	get_tree().paused = false
+	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+
 func _player_inside_ship() -> bool:
 	if not is_instance_valid(ship_root) or not player:
 		return false
@@ -1154,7 +1220,7 @@ func _update_ship_interior(delta: float) -> void:
 	if ship_inside and not ship_entered:
 		ship_entered = true
 		Sfx.play("click")
-		_show_popup("🚀 Interior da nave • vazia por enquanto")
+		_show_popup("🚀 Interior da nave • console desligado")
 	elif not ship_inside and ship_entered:
 		var local := player.global_position - ship_position
 		if Vector2(local.x, local.z).length() > 6.0:
@@ -1167,8 +1233,10 @@ func _update_hint() -> void:
 	var item: Node3D = _nearest_item()
 	var mission: Dictionary = GameManager.get_current_mission()
 	var hint := "Explore os biomas • Encontre recursos e o lago turquesa"
-	if ship_inside:
-		hint = "🚀 Interior da nave • vazia por enquanto • saia pela rampa"
+	if GameManager.missions_complete and _player_inside_ship():
+		hint = GameManager.t("ending_console_hint") if _near_ship_console() else GameManager.t("ending_console_go")
+	elif ship_inside:
+		hint = "🚀 Interior da nave • console desligado • complete as missões"
 	elif _should_use_lake(mission, item):
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif item:
@@ -1177,7 +1245,7 @@ func _update_hint() -> void:
 	elif _near_lake():
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif _near_ship_door():
-		hint = "🚀 Suba a rampa para entrar na nave"
+		hint = GameManager.t("ending_console_door") if GameManager.missions_complete else "🚀 Suba a rampa para entrar na nave"
 	$CanvasLayer/HUD/HintLabel.text = hint
 
 var touch_left := false
@@ -1262,6 +1330,12 @@ func _on_jump_pressed() -> void:
 
 func _on_interact_pressed() -> void:
 	if paused or game_over:
+		return
+	if GameManager.missions_complete and _player_inside_ship():
+		if _near_ship_console():
+			_start_ending()
+		else:
+			_show_popup(GameManager.t("ending_console_go"))
 		return
 	var m: Dictionary = GameManager.get_current_mission()
 	if m.get("action", "") == "report":

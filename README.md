@@ -2,17 +2,17 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.3.1** — animais em movimento, nave explorável no solo, lago intransponível e mais detalhes espaciais.
+**Versão do código: 0.3.2** — desfecho narrativo ao reativar o console da nave, além de animais em movimento, nave explorável no solo, lago intransponível e mais detalhes espaciais.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.3.1-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.1)
+[![Release](https://img.shields.io/badge/release-v0.3.2-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.2)
 
-[⬇️ Baixar Astrofilia.apk (v0.3.1)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.1/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.3.2)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.2/Astrofilia.apk)
 
 ## 📖 História
 
-Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, encontra o interior vazio e os sistemas desligados — e agora precisa sobreviver aos perigos do planeta: animais, comida venenosa e o clima local.
+Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, encontra o interior silencioso e o console sem energia — e agora precisa sobreviver aos perigos do planeta (animais, comida venenosa e o clima local) enquanto reúne recursos para reativar o console e voltar para casa.
 
 ## 🌍 Biomas
 
@@ -37,7 +37,8 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - Cutscene inicial: foguete partindo com aplausos, nave pousando e astronauta descendo
 - Caixa de texto vermelha no topo com missões sequenciais (8 do Coletor + 8 do Biólogo)
 - Missões alternadas no singleplayer e por função no multiplayer
-- Missão final: "Virem juntos para casa!" / "Volte para casa!"
+- Missão final: "Virem juntos para casa! Ativem o console da nave" / "Volte para casa! Ative o console da nave"
+- **Desfecho narrativo**: ao concluir as 16 missões, ative o console no fundo da nave para ver a tela final com nível, pontos, recursos e missões concluídas; escolha **Continuar explorando** ou voltar ao **Menu principal**
 - **Capítulos**: aviso central de 3 segundos ("CAPÍTULO 1", "CAPÍTULO 2"...) ao avançar o progresso, com bônus de XP
 - **Nível (NV) e Experiência (EXP)**: barra na HUD, XP por coleta/missão/capítulo e cura parcial ao subir de nível
 - HUD com vida, fome, sede, pontuação e inventário, com porcentagens e alertas coloridos
@@ -46,12 +47,12 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - Ciclo dia/noite com sol em órbita, luz da lua, estrelas e clima dinâmico (chuva, neve, tempestade de areia e poeira com partículas próprias)
 - **Biomas com transição suave**: um único terreno com shader mistura deserto, floresta e nevado, sem emendas
 - **Animais em movimento**: as criaturas patrulham ao redor do ponto onde nascem, viram-se para a direção do movimento e não entram no lago nem na nave
-- **Nave explorável**: a nave pousou sobre uma plataforma iluminada no deserto; suba pela rampa para entrar no interior vazio, com console de voo e iluminação própria
+- **Nave explorável**: a nave pousou sobre uma plataforma iluminada no deserto; suba pela rampa para entrar no interior, com console de voo e iluminação própria — o console só responde quando todas as missões forem concluídas
 - **Lago intransponível**: a água bloqueia a passagem e só pode ser contornada pelas margens
 - Gráficos detalhados: cactos, cogumelos, arbustos, pinheiros, cristais de gelo, lago com água animada, margem e vitórias-régias
 - **Céu espacial**: planeta gigante com anéis, lua distante, estrelas, sol em órbita e névoa atmosférica
 - Pausa, Game Over e reinício
-- Conquistas e salvamento automático
+- Conquistas (incluindo **Voltou para casa**) e salvamento automático
 - Controles por teclado e touch (joystick virtual + botões)
 - Menu com 2 slots de save, idioma (PT/EN/ES), aparência, volumes e modo de jogo
 - Salvamento avançado com JSON (placeholders, progresso e cooldown de itens)
@@ -130,6 +131,7 @@ MIT — veja [LICENSE](LICENSE).
 - O lago com água animada recupera 40 pontos de hidratação por interação, inclusive após o tutorial.
 - Fome e sede diminuem continuamente; o clima altera a velocidade da sede. Frutas (+20 fome, +6 sede), carne (+25 fome) e plantas (+8 sede) ajudam a sobreviver. Abaixo de 25% a HUD avisa e tinge o medidor.
 - A cada capítulo avançado aparece um painel central por 3 segundos e o jogador ganha 50 EXP.
+- Com todas as missões concluídas, o console da nave fica ativo. Aproxime-se e pressione **E / AÇÃO** para iniciar o desfecho; a tela final resume a jornada e permite continuar explorando.
 - EXP é ganha ao coletar (+10), analisar (+5), concluir missão (+25) e avançar capítulo (+50). Ao subir de nível, vida/fome/sede são parcialmente restauradas.
 - Controles de toque aparecem em dispositivos com tela sensível ao toque.
 
@@ -141,7 +143,7 @@ XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/as
 
 Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
 
-Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave e animais:
+Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais e desfecho:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-progress-tests godot --headless --path . --log-file /tmp/astrofilia-progress-tests.log --script tests/progression.gd

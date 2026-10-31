@@ -174,7 +174,9 @@ func _play_cutscene() -> void:
 	mission_panel.visible = true
 	mission_label.text = "Pegue suas ferramentas e siga as missões!"
 	await get_tree().create_timer(2.5).timeout
-	# A nave apresenta falha e o jogador começa o capítulo 1
-	mission_label.text = "⚠ Sistema da nave falhando... ⚠"
-	await get_tree().create_timer(2.0).timeout
+	# A nave perde energia e o jogador precisa reativar o console.
+	mission_label.text = "⚠ A nave perdeu energia... ⚠"
+	await get_tree().create_timer(1.8).timeout
+	mission_label.text = "Reúna recursos e reative o console para voltar para casa!"
+	await get_tree().create_timer(2.4).timeout
 	get_tree().change_scene_to_file("res://scenes/Gameplay.tscn")

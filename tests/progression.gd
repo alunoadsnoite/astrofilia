@@ -56,6 +56,7 @@ func run_checks() -> void:
 	manager.xp_to_next_level = 100
 	scene._check_chapter()
 	check(scene.chapter_title.text == "CAPÍTULO 2", "chapter title advances to 2")
+	check(scene.chapter_subtitle.text == "A Nave Silenciosa", "chapter 2 subtitle matches the powered ship")
 	check(manager.experience == 50, "advancing a chapter grants 50 xp")
 	check(scene.chapter_banner.visible and scene.chapter_banner.modulate.a <= 0.01, "banner fades in from transparent")
 
@@ -72,8 +73,37 @@ func run_checks() -> void:
 	manager.current_mission_index = 0
 	scene._restore_snapshot(final_snapshot)
 	check(manager.missions_complete and manager.current_mission_index == manager.mission_list.size(), "completed game stays completed after restoring a save")
-	check(scene.mission_label.text == "Volte para casa!", "final mission message survives save/load")
+	check(scene.mission_label.text == "Volte para casa! Ative o console da nave", "final mission message survives save/load")
 	manager.missions_complete = false
+
+	# Desfecho: só ativa com todas as missões concluídas e no console da nave.
+	var ending_return_pos: Vector3 = scene.player.global_position
+	var console_pos: Vector3 = scene.ship_position + Vector3(0, 1.2, -3.85)
+	scene.player.global_position = console_pos
+	manager.missions_complete = false
+	scene._start_ending()
+	check(not scene.ending_started, "ending does not start before all missions are complete")
+	check(not scene.ending_overlay.visible and not scene.ending_panel.visible, "ending panel stays hidden before completion")
+	manager.missions_complete = true
+	check(scene._player_inside_ship(), "player can reach the ship console")
+	check(scene._near_ship_console(), "console interaction triggers when the player is close")
+	scene._start_ending()
+	check(scene.ending_started, "ending starts at the console after all missions")
+	check(scene.ending_overlay.visible and scene.ending_panel.visible, "ending overlay and panel become visible")
+	check(scene.ending_title.text == "DE VOLTA AO LAR", "ending title is translated")
+	check(scene.ending_stats.text.contains("Missões: 16/16"), "ending shows completed missions")
+	check(scene.ending_stats.text.contains("Nível"), "ending shows the player level")
+	check(manager.achievements.has("Voltou para casa"), "ending unlocks the home achievement")
+	check(scene.ending_stats.text.contains("Recursos"), "ending shows collected resources")
+	check(scene.paused and not scene.player.is_physics_processing(), "ending pauses gameplay")
+	scene._close_ending()
+	check(not scene.ending_started and not scene.ending_panel.visible, "closing the ending hides the panel")
+	check(not scene.paused and scene.player.is_physics_processing(), "closing the ending resumes gameplay")
+	scene.player.global_position = scene.ship_position + Vector3(0, 1.4, 0)
+	scene._update_hint()
+	check("console" in scene.get_node("CanvasLayer/HUD/HintLabel").text.to_lower(), "hint points to the console after completion")
+	manager.missions_complete = false
+	scene.player.global_position = ending_return_pos
 
 	# HUD de sobrevivência com porcentagem.
 	scene.hunger = 53.4
