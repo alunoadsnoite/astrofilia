@@ -2,17 +2,17 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.3.3** — limite de gravidade no planeta, introdução com o planeta girando e desfecho narrativo ao reativar o console da nave.
+**Versão do código: 0.3.4** — robô de missões e beliche na nave, combate com animais, contador de dias e clima no HUD.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.3.3-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.3)
+[![Release](https://img.shields.io/badge/release-v0.3.4-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.4)
 
-[⬇️ Baixar Astrofilia.apk (v0.3.3)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.3/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.3.4)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.4/Astrofilia.apk)
 
 ## 📖 História
 
-Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, encontra o interior silencioso e o console sem energia — e agora precisa sobreviver aos perigos do planeta (animais, comida venenosa e o clima local) enquanto reúne recursos para reativar o console e voltar para casa.
+Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em que ele coleta minerais e plantas. Ao voltar para a nave, encontra o interior silencioso, o console sem energia e a robô **ARIA**, que acompanha as missões. Ele precisa sobreviver aos perigos do planeta (animais, comida venenosa e o clima local), dormir no beliche durante a noite e reunir recursos para reativar o console e voltar para casa.
 
 ## 🌍 Biomas
 
@@ -38,15 +38,20 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - Caixa de texto vermelha no topo com missões sequenciais (8 do Coletor + 8 do Biólogo)
 - Missões alternadas no singleplayer e por função no multiplayer
 - Missão final: "Virem juntos para casa! Ativem o console da nave" / "Volte para casa! Ative o console da nave"
+- **ARIA, a robô de missões**: dentro da nave, conversa com o jogador, apresenta a missão atual, o progresso e dicas; também aponta o console quando tudo for concluído
+- **Beliche de duas camas**: dentro da nave, permite dormir à noite, avançar até o amanhecer, recuperar vida e iniciar um novo dia
 - **Desfecho narrativo**: ao concluir as 16 missões, ative o console no fundo da nave para ver a tela final com nível, pontos, recursos e missões concluídas; escolha **Continuar explorando** ou voltar ao **Menu principal**
 - **Capítulos**: aviso central de 3 segundos ("CAPÍTULO 1", "CAPÍTULO 2"...) ao avançar o progresso, com bônus de XP
 - **Nível (NV) e Experiência (EXP)**: barra na HUD, XP por coleta/missão/capítulo e cura parcial ao subir de nível
 - HUD com vida, fome, sede, pontuação e inventário, com porcentagens e alertas coloridos
+- **Vida, fome e sede**: o astronauta perde vida com ataques de animais e com fome/sede zeradas; dormir e subir de nível recuperam vida
 - Coleta de itens com feedback visual e efeitos sonoros de interface e de jogo (clique, coleta, missão, nível, capítulo e água)
 - **Fome e sede**: decaimento contínuo influenciado pelo clima, avisos de nível baixo, dano ao chegar a zero e bônus ao comer fruta/carne, beber no lago ou consumir plantas
-- Ciclo dia/noite com sol em órbita, luz da lua, estrelas e clima dinâmico (chuva, neve, tempestade de areia e poeira com partículas próprias)
+- Ciclo dia/noite com sol em órbita, luz da lua, estrelas, contador de dias e clima dinâmico (limpo, chuva, neve e tempestade de areia com partículas próprias)
+- HUD de ciclos mostra **Dia N**, horário, ícone do clima e nome do clima atual
 - **Biomas com transição suave**: um único terreno com shader mistura deserto, floresta e nevado, sem emendas
-- **Animais em movimento**: as criaturas patrulham ao redor do ponto onde nascem, viram-se para a direção do movimento e não entram no lago nem na nave
+- **Animais em movimento e combate**: as criaturas patrulham ao redor do ponto onde nascem, viram-se para a direção do movimento e não entram no lago nem na nave
+- **Combate com animais**: use **E / AÇÃO** para atacar; criaturas agressivas revidam e perseguem o jogador, criaturas ariscas (ou feridas) fogem. Ao perder a vida, a criatura vira carne e reaparece depois
 - **Limite de gravidade**: paredes invisíveis contornam a área jogável e, se o astronauta escapar, a gravidade do planeta o traz de volta
 - **Nave explorável**: a nave pousou sobre uma plataforma iluminada no deserto; suba pela rampa para entrar no interior, com console de voo e iluminação própria — o console só responde quando todas as missões forem concluídas
 - **Lago intransponível**: a água bloqueia a passagem e só pode ser contornada pelas margens
@@ -115,7 +120,8 @@ O APK de depuração é gerado em `build/Astrofilia.apk`.
 |------|---------|-------|
 | Mover | WASD / Setas | Joystick virtual |
 | Pular | Espaço | Botão ⬆ |
-| Coletar / analisar / beber | E, próximo ao alvo | Botão ✋ |
+| Coletar / analisar / beber / atacar | E, próximo ao alvo | Botão ✋ |
+| Falar com ARIA / dormir no beliche | E, dentro da nave | Botão ✋ |
 | Pausar | — | Botão ⏸ |
 
 ## 📄 Licença
@@ -133,6 +139,8 @@ MIT — veja [LICENSE](LICENSE).
 - Fome e sede diminuem continuamente; o clima altera a velocidade da sede. Frutas (+20 fome, +6 sede), carne (+25 fome) e plantas (+8 sede) ajudam a sobreviver. Abaixo de 25% a HUD avisa e tinge o medidor.
 - A cada capítulo avançado aparece um painel central por 3 segundos e o jogador ganha 50 EXP.
 - Com todas as missões concluídas, o console da nave fica ativo. Aproxime-se e pressione **E / AÇÃO** para iniciar o desfecho; a tela final resume a jornada e permite continuar explorando.
+- ARIA fica à esquerda do interior da nave e o beliche à direita. Ao anoitecer, o beliche permite dormir até o amanhecer; durante o dia ele apenas informa que é cedo demais.
+- Cada ataque causa 14 de dano e as criaturas têm 30 de vida. Criaturas agressivas revidam; ariscas fogem. Ataques de animais causam 8 de vida, com breve invulnerabilidade após cada mordida.
 - O astronauta não cai mais no vazio: a área do planeta tem limites invisíveis e qualquer queda é revertida para o último ponto firme.
 - EXP é ganha ao coletar (+10), analisar (+5), concluir missão (+25) e avançar capítulo (+50). Ao subir de nível, vida/fome/sede são parcialmente restauradas.
 - Controles de toque aparecem em dispositivos com tela sensível ao toque.
@@ -145,7 +153,7 @@ XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/as
 
 Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
 
-Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais, limite do planeta e desfecho:
+Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais, combate, ARIA, beliche, limite do planeta e desfecho:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-progress-tests godot --headless --path . --log-file /tmp/astrofilia-progress-tests.log --script tests/progression.gd
@@ -159,7 +167,7 @@ XDG_DATA_HOME=/tmp/astrofilia-ship-tests godot --headless --path . --log-file /t
 
 ## Salvamento e aparência
 
-- Cada um dos dois slots guarda posição, vida, fome, hidratação, inventário, pontos e progresso parcial das missões.
+- Cada um dos dois slots guarda posição, vida, fome, hidratação, inventário, pontos, contador de dias e progresso parcial das missões.
 - Horário, clima, disposição da decoração e tempo de reaparecimento dos recursos são preservados.
 - **Continuar:** clique no slot salvo para voltar diretamente ao planeta, sem repetir a introdução.
 - Salvamento automático a cada 10 segundos, ao perder o foco e antes de sair; botão **Salvar partida** no menu de pausa.

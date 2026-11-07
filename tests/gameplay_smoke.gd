@@ -55,7 +55,11 @@ func run_checks() -> void:
 			for resource in scene.items_node.get_children():
 				if resource.tipo_item == mission.target and resource.available:
 					scene.player.position = resource.position
-					scene._on_interact_pressed()
+					# Criaturas precisam ser atacadas até perder a vida antes de virarem carne.
+					var presses := 3 if mission.action == "collect" and mission.target == "animal" else 1
+					for i in range(presses):
+						if resource.available:
+							scene._on_interact_pressed()
 					found = true
 					break
 			if not found:

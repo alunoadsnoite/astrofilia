@@ -105,6 +105,72 @@ func run_checks() -> void:
 	manager.missions_complete = false
 	scene.player.global_position = ending_return_pos
 
+	# Robô ARIA e beliche dentro da nave.
+	manager.current_mission_index = 0
+	manager.current_mission_progress = 0
+	scene._update_mission()
+	check(scene.robot_root != null and scene.robot_root.name == "MissionRobot", "mission robot exists inside the ship")
+	check(scene.bed_root != null and scene.bed_root.name == "BunkBed", "bunk bed exists inside the ship")
+	check(scene.robot_root.position.distance_to(Vector3(-1.5, 0.585, -1.9)) < 0.01, "robot stands on the ship floor")
+	check(scene.bed_root.position.distance_to(Vector3(1.47, 0.585, 1.9)) < 0.01, "bunk bed stands on the ship floor")
+	scene.player.global_position = scene.robot_position
+	check(scene._near_robot(), "player can reach the mission robot")
+	check(scene._ship_station_nearby() == "robot", "robot is the nearest ship station")
+	scene._talk_to_robot()
+	check(scene.robot_panel.visible, "robot dialog opens")
+	check(scene.paused and not scene.player.is_physics_processing(), "robot dialog pauses gameplay")
+	check("Missão" in scene.robot_body_label.text, "robot shows the current mission")
+	check(manager.achievements.has("Contato com ARIA"), "talking to ARIA unlocks an achievement")
+	scene._close_robot_dialog()
+	check(not scene.robot_panel.visible and not scene.paused, "closing the robot dialog resumes gameplay")
+
+	scene.player.global_position = scene.bed_position
+	check(scene._near_bed(), "player can reach the bunk bed")
+	scene.time_of_day = 0.92
+	var day_before_sleep: int = scene.day_count
+	scene.health = 40.0
+	scene._sleep_in_bed()
+	check(scene.time_of_day > 0.2 and scene.time_of_day < 0.35, "sleeping wakes the player at dawn")
+	check(scene.day_count == day_before_sleep + 1, "sleeping past midnight advances the day")
+	check(scene.health > 40.0, "sleeping restores health")
+	scene.time_of_day = 0.5
+	var day_before_nap: int = scene.day_count
+	scene._sleep_in_bed()
+	check(scene.day_count == day_before_nap and is_equal_approx(scene.time_of_day, 0.5), "the bed cannot be used during the day")
+	check(int(scene._snapshot().get("day", 0)) == scene.day_count, "day counter is stored in the save")
+
+	# Combate: criaturas revidam ou fogem, podem ferir e ser derrotadas.
+	var beast: Node3D = null
+	for creature in scene.items_node.get_children():
+		if creature.tipo_item == "animal" and creature.available:
+			beast = creature
+			break
+	check(beast != null, "a creature is available to fight")
+	beast.temperament = "skittish"
+	beast.health = beast.max_health
+	beast.hit(10.0, scene.player)
+	check(beast.health < beast.max_health, "attacks reduce creature health")
+	check(beast.combat_state == "flee", "a skittish creature flees after being hit")
+	beast.temperament = "aggressive"
+	beast.health = beast.max_health
+	beast.hit(10.0, scene.player)
+	check(beast.combat_state == "chase", "an aggressive creature retaliates")
+	scene.player.global_position = ending_return_pos
+	beast.global_position = scene.player.global_position + Vector3(1.0, 0, 0)
+	beast.combat_state = "chase"
+	beast.combat_timer = 5.0
+	beast.attack_timer = 0.0
+	scene.damage_cooldown = 0.0
+	var health_before_bite: float = scene.health
+	beast._process_chase(0.1)
+	check(scene.health < health_before_bite, "a retaliating creature damages the player")
+	beast.combat_state = "wander"
+	beast.health = beast.max_health
+	beast.hit(999.0, scene.player)
+	check(not beast.available, "a defeated creature drops meat")
+	beast._respawn()
+	check(beast.available and is_equal_approx(beast.health, beast.max_health), "defeated creatures respawn with full health")
+
 	# Limite do planeta: paredes invisíveis e recuperação da gravidade.
 	check(scene.boundary_body != null and scene.boundary_body.get_child_count() == 4, "planet boundary has four invisible walls")
 	var boundary_ok := true

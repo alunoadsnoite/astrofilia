@@ -48,9 +48,10 @@ var thirst: float = 100.0
 var score: int = 0
 var inventory: Dictionary = {"mineral": 0, "fruit": 0, "plant": 0, "crystal": 0, "stone": 0}
 
-# Time of day
+# Ciclo de dia e noite
 var time_of_day: float = 0.3  # 0..1
 var day_speed: float = 0.003
+var day_count: int = 1
 
 # Weather
 var weather: String = "clear"  # clear, rain, sandstorm, snow
@@ -91,6 +92,17 @@ const WORLD_LIMIT := 43.5
 const VOID_Y := -3.0
 var boundary_body: StaticBody3D
 var last_safe_position: Vector3 = Vector3(0, 1.0, 0)
+# Interior da nave: robô de missões e beliche.
+var robot_root: Node3D
+var bed_root: Node3D
+var robot_position: Vector3
+var bed_position: Vector3
+var robot_panel: Panel
+var robot_body_label: Label
+var robot_talked: bool = false
+var sleep_overlay: ColorRect
+var damage_overlay: ColorRect
+var damage_cooldown: float = 0.0
 var ship_root: Node3D
 var ship_roof: MeshInstance3D
 var ship_body: StaticBody3D
@@ -117,7 +129,9 @@ func _ready() -> void:
 	_create_lake()
 	_create_sky_features()
 	_create_ship()
+	_create_crew_quarters()
 	_create_landmarks()
+	_setup_extra_ui()
 	_setup_touch()
 	_restore_snapshot(GameManager.pending_snapshot)
 	GameManager.pending_snapshot.clear()
@@ -155,8 +169,12 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if paused or game_over:
 		return
-	# Ciclo de dia e noite
+	# Ciclo de dia e noite (conta os dias ao atravessar a meia-noite).
+	var previous_time := time_of_day
 	time_of_day = fmod(time_of_day + day_speed * delta, 1.0)
+	if time_of_day < previous_time:
+		day_count += 1
+	damage_cooldown = maxf(0.0, damage_cooldown - delta)
 	_update_day_night()
 	_update_time_label()
 	# Fome e sede (o clima acelera ou alivia a sede)
@@ -192,6 +210,10 @@ func _process(delta: float) -> void:
 		camera.global_position = camera.global_position.lerp(target, 1.0 - exp(-8.0 * delta))
 		camera.look_at(player.global_position, Vector3.UP)
 	_update_ship_interior(delta)
+	if is_instance_valid(robot_root):
+		var clock := Time.get_ticks_msec() * 0.001
+		robot_root.rotation.y = sin(clock * 0.9) * 0.12
+		robot_root.position.y = 0.585 + sin(clock * 1.6) * 0.015
 	_update_planet_bounds()
 	_update_weather_fx(delta)
 	_update_mission()
@@ -748,7 +770,14 @@ func _update_time_label() -> void:
 			icon = "❄"
 		"sandstorm":
 			icon = "🌪"
-	time_label.text = "%s %02d:%02d" % [icon, hours, minutes]
+	time_label.text = "%s Dia %d • %02d:%02d • %s" % [icon, day_count, hours, minutes, _weather_label()]
+
+func _weather_label() -> String:
+	return {"clear": "Limpo", "rain": "Chuva", "snow": "Neve", "sandstorm": "Tempestade"}.get(weather, "Limpo")
+
+func _is_night() -> bool:
+	var hours := int(time_of_day * 24.0) % 24
+	return hours < 6 or hours >= 19
 
 func _check_chapter() -> void:
 	if GameManager.mission_list.is_empty():
@@ -1164,6 +1193,259 @@ func _create_ship() -> void:
 	for z in [-2.2, 1.4]:
 		_ship_part(ship_root, _ship_box(Vector3(1.5, 0.035, 0.22)), Color("bdefff"), Vector3(0, 3.08, z), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("bdefff"), 1.6)
 
+func _create_crew_quarters() -> void:
+	# ARIA: robô que envia e acompanha as missões dentro da nave.
+	robot_root = Node3D.new()
+	robot_root.name = "MissionRobot"
+	robot_root.position = Vector3(-1.5, 0.585, -1.9)
+	ship_root.add_child(robot_root)
+	var dark := Color("2b3440")
+	var shell := Color("cdd7df")
+	var cyan := Color("5ce0d0")
+	_ship_part(robot_root, _ship_cylinder(0.34, 0.42, 0.16, 16), dark, Vector3(0, 0.08, 0), Vector3.ONE, Vector3.ZERO, 0.7, 0.35)
+	_ship_part(robot_root, _ship_cylinder(0.24, 0.30, 0.72, 16), shell, Vector3(0, 0.52, 0), Vector3.ONE, Vector3.ZERO, 0.5, 0.3)
+	_ship_part(robot_root, _ship_sphere(0.27, 16, 8), shell, Vector3(0, 1.06, 0), Vector3(1.0, 0.92, 0.9), Vector3.ZERO, 0.45, 0.28)
+	_ship_part(robot_root, _ship_box(Vector3(0.36, 0.11, 0.06)), cyan, Vector3(0, 1.10, 0.24), Vector3.ONE, Vector3.ZERO, 0.2, 0.2, cyan, 1.5)
+	_ship_part(robot_root, _ship_box(Vector3(0.16, 0.16, 0.04)), cyan, Vector3(0, 0.58, 0.29), Vector3.ONE, Vector3.ZERO, 0.2, 0.2, cyan, 1.1)
+	for side in [-1.0, 1.0]:
+		_ship_part(robot_root, _ship_cylinder(0.055, 0.06, 0.52, 8), dark, Vector3(side * 0.33, 0.52, 0), Vector3.ONE, Vector3(0, 0, side * 0.35), 0.6, 0.4)
+		_ship_part(robot_root, _ship_sphere(0.075, 8, 4), cyan, Vector3(side * 0.42, 0.27, 0), Vector3.ONE, Vector3.ZERO, 0.2, 0.2, cyan, 0.8)
+	_ship_part(robot_root, _ship_cylinder(0.025, 0.03, 0.32, 8), dark, Vector3(0, 1.36, 0))
+	_ship_part(robot_root, _ship_sphere(0.065, 10, 5), cyan, Vector3(0, 1.54, 0), Vector3.ONE, Vector3.ZERO, 0.2, 0.2, cyan, 2.0)
+	var label := Label3D.new()
+	label.text = "ARIA"
+	label.position = Vector3(0, 1.78, 0)
+	label.font_size = 42
+	label.outline_size = 10
+	label.modulate = Color("8ff3e4")
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	robot_root.add_child(label)
+	var robot_light := OmniLight3D.new()
+	robot_light.light_color = Color("62e6d4")
+	robot_light.light_energy = 0.65
+	robot_light.omni_range = 3.2
+	robot_light.position = Vector3(0, 1.2, 0)
+	robot_root.add_child(robot_light)
+	_ship_collider(Vector3(0.85, 1.35, 0.65), Vector3(-1.5, 1.0, -1.9))
+	robot_position = ship_position + Vector3(-1.5, 1.0, -1.9)
+
+	# Beliche de duas camas, encostado na parede direita.
+	bed_root = Node3D.new()
+	bed_root.name = "BunkBed"
+	bed_root.position = Vector3(1.47, 0.585, 1.9)
+	ship_root.add_child(bed_root)
+	var frame := Color("7d8a96")
+	var mattress := Color("5f8fc4")
+	var pillow := Color("e8eef5")
+	var blanket := Color("2d5f8f")
+	for x in [-0.55, 0.55]:
+		for z in [-1.15, 1.15]:
+			_ship_part(bed_root, _ship_box(Vector3(0.10, 1.85, 0.10)), frame, Vector3(x, 0.92, z), Vector3.ONE, Vector3.ZERO, 0.7, 0.35)
+	for y in [0.52, 1.52]:
+		_ship_part(bed_root, _ship_box(Vector3(1.12, 0.12, 2.36)), frame, Vector3(0, y, 0), Vector3.ONE, Vector3.ZERO, 0.65, 0.4)
+		_ship_part(bed_root, _ship_box(Vector3(1.02, 0.16, 2.20)), mattress, Vector3(0, y + 0.13, 0), Vector3.ONE, Vector3.ZERO, 0.25, 0.65)
+		_ship_part(bed_root, _ship_box(Vector3(0.72, 0.10, 0.40)), pillow, Vector3(0, y + 0.24, -0.82), Vector3.ONE, Vector3.ZERO, 0.1, 0.85)
+		_ship_part(bed_root, _ship_box(Vector3(1.00, 0.05, 1.10)), blanket, Vector3(0, y + 0.22, 0.48), Vector3.ONE, Vector3.ZERO, 0.2, 0.75)
+	for i in range(4):
+		_ship_part(bed_root, _ship_box(Vector3(0.06, 0.05, 1.15)), frame, Vector3(-0.62, 0.28 + i * 0.42, 0.2))
+	_ship_collider(Vector3(1.25, 1.9, 2.5), Vector3(1.47, 0.95, 1.9))
+	bed_position = ship_position + Vector3(1.0, 1.0, 1.9)
+
+func _near_robot() -> bool:
+	return _player_inside_ship() and player.global_position.distance_to(robot_position) <= 1.8
+
+func _near_bed() -> bool:
+	return _player_inside_ship() and player.global_position.distance_to(bed_position) <= 1.8
+
+func _ship_station_nearby() -> String:
+	if not _player_inside_ship():
+		return ""
+	var stations := [
+		["robot", robot_position, 1.8],
+		["bed", bed_position, 1.8],
+		["console", ship_position + Vector3(0, 1.2, -3.85), 2.8],
+	]
+	var best := ""
+	var best_distance := INF
+	for station in stations:
+		var distance: float = player.global_position.distance_to(station[1])
+		if distance <= float(station[2]) and distance < best_distance:
+			best_distance = distance
+			best = station[0]
+	return best
+
+func _talk_to_robot() -> void:
+	if ending_started:
+		return
+	if not robot_talked:
+		robot_talked = true
+		GameManager.add_achievement("Contato com ARIA")
+		_gain_xp(10)
+	_refresh_robot_dialog()
+	robot_panel.visible = true
+	robot_panel.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(robot_panel, "modulate:a", 1.0, 0.25)
+	paused = true
+	player.external_move = Vector2.ZERO
+	player.set_physics_process(false)
+	_clear_touch()
+	touch_controls.visible = false
+	Sfx.play("click")
+
+func _refresh_robot_dialog() -> void:
+	if not is_instance_valid(robot_body_label):
+		return
+	var lines: Array[String] = []
+	lines.append("Olá, %s. Sou ARIA, a inteligência da nave." % GameManager.player_name)
+	if GameManager.missions_complete:
+		lines.append("Todas as %d missões foram concluídas. O console no fundo da nave está liberado para voltar para casa." % GameManager.mission_list.size())
+	else:
+		var mission := GameManager.get_current_mission()
+		var total := GameManager.mission_list.size()
+		var index := clampi(GameManager.current_mission_index + 1, 1, total)
+		lines.append("Missão %d/%d\n%s" % [index, total, GameManager.get_mission_text(mission)])
+		var need := int(mission.get("count", 1))
+		if need > 1:
+			lines.append("Progresso: %d/%d" % [GameManager.current_mission_progress, need])
+		lines.append("Dica: aproxime-se do alvo e use AÇÃO para coletar, analisar ou atacar criaturas.")
+	lines.append("Dia %d • %s • %s" % [day_count, "Noite" if _is_night() else "Dia", _weather_label()])
+	robot_body_label.text = "\n\n".join(lines)
+
+func _close_robot_dialog() -> void:
+	robot_panel.visible = false
+	paused = false
+	player.set_physics_process(true)
+	touch_controls.visible = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
+
+func _sleep_in_bed() -> void:
+	if ending_started or game_over:
+		return
+	if not _is_night():
+		_show_popup("🛏 O beliche serve para dormir à noite. Volte quando anoitecer.")
+		return
+	var slept_after_midnight := time_of_day >= 0.79
+	time_of_day = 0.27
+	if slept_after_midnight:
+		day_count += 1
+	health = minf(100.0, health + 30.0)
+	hunger = maxf(0.0, hunger - 4.0)
+	thirst = maxf(0.0, thirst - 4.0)
+	_update_bars()
+	_update_day_night()
+	_update_time_label()
+	_flash_sleep()
+	Sfx.play("level")
+	_show_popup("💤 Você dormiu até o amanhecer • +30 vida • Dia %d" % day_count)
+
+func _attack_animal(animal: Node3D) -> void:
+	if not is_instance_valid(animal) or not animal.available:
+		return
+	var alive_before: bool = animal.health > 0.0
+	animal.hit(14.0, player)
+	Sfx.play("click")
+	if not animal.available:
+		_gain_xp(8)
+		_show_popup("🏆 Criatura derrotada! Você ganhou carne.")
+	elif alive_before:
+		_gain_xp(6)
+		var reaction := "ela revidou!" if animal.combat_state == "chase" else "ela fugiu!"
+		_show_popup("⚔ Criatura %d/%d ❤ • %s" % [int(ceil(animal.health)), int(animal.max_health), reaction])
+
+func hurt_player(amount: float, source: String = "Criatura") -> void:
+	if game_over or paused or ending_started or damage_cooldown > 0.0:
+		return
+	damage_cooldown = 0.85
+	health = maxf(0.0, health - amount)
+	_update_bars()
+	_flash_damage()
+	_show_popup("💥 %s atacou você • -%d vida" % [source, int(round(amount))])
+	if health <= 0.0:
+		_trigger_game_over()
+
+func _setup_extra_ui() -> void:
+	var canvas: CanvasLayer = $CanvasLayer
+	sleep_overlay = ColorRect.new()
+	sleep_overlay.name = "SleepOverlay"
+	sleep_overlay.color = Color(0.004, 0.008, 0.025, 1)
+	sleep_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sleep_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sleep_overlay.visible = false
+	canvas.add_child(sleep_overlay)
+
+	damage_overlay = ColorRect.new()
+	damage_overlay.name = "DamageOverlay"
+	damage_overlay.color = Color(0.72, 0.05, 0.04, 1)
+	damage_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	damage_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	damage_overlay.visible = false
+	canvas.add_child(damage_overlay)
+
+	robot_panel = Panel.new()
+	robot_panel.name = "RobotPanel"
+	robot_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	robot_panel.visible = false
+	robot_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	robot_panel.offset_left = -320.0
+	robot_panel.offset_top = -210.0
+	robot_panel.offset_right = 320.0
+	robot_panel.offset_bottom = 210.0
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.015, 0.06, 0.09, 0.98)
+	style.border_color = Color(0.36, 0.88, 0.82, 0.92)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(20)
+	robot_panel.add_theme_stylebox_override("panel", style)
+	canvas.add_child(robot_panel)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 30)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_right", 30)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	robot_panel.add_child(margin)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	margin.add_child(box)
+	var title := Label.new()
+	title.text = "🤖 ARIA • CENTRAL DE MISSÕES"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 23)
+	title.add_theme_color_override("font_color", Color(0.55, 0.95, 0.88))
+	box.add_child(title)
+	robot_body_label = Label.new()
+	robot_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	robot_body_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	robot_body_label.add_theme_font_size_override("font_size", 17)
+	robot_body_label.add_theme_color_override("font_color", Color(0.86, 0.94, 1.0))
+	box.add_child(robot_body_label)
+	var close_button := Button.new()
+	close_button.text = "Fechar"
+	close_button.custom_minimum_size = Vector2(0, 42)
+	close_button.pressed.connect(_close_robot_dialog)
+	box.add_child(close_button)
+
+func _flash_sleep() -> void:
+	if not is_instance_valid(sleep_overlay):
+		return
+	sleep_overlay.visible = true
+	sleep_overlay.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(sleep_overlay, "modulate:a", 1.0, 0.35)
+	tween.tween_interval(0.15)
+	tween.tween_property(sleep_overlay, "modulate:a", 0.0, 0.85)
+	tween.tween_callback(func() -> void: sleep_overlay.visible = false)
+
+func _flash_damage() -> void:
+	if not is_instance_valid(damage_overlay):
+		return
+	damage_overlay.visible = true
+	damage_overlay.modulate.a = 0.45
+	var tween := create_tween()
+	tween.tween_property(damage_overlay, "modulate:a", 0.0, 0.55)
+	tween.tween_callback(func() -> void: damage_overlay.visible = false)
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact"):
 		_on_interact_pressed()
@@ -1270,15 +1552,24 @@ func _update_hint() -> void:
 	var item: Node3D = _nearest_item()
 	var mission: Dictionary = GameManager.get_current_mission()
 	var hint := "Explore os biomas • Encontre recursos e o lago turquesa"
-	if GameManager.missions_complete and _player_inside_ship():
-		hint = GameManager.t("ending_console_hint") if _near_ship_console() else GameManager.t("ending_console_go")
-	elif ship_inside:
-		hint = "🚀 Interior da nave • console desligado • complete as missões"
+	if _player_inside_ship():
+		match _ship_station_nearby():
+			"robot":
+				hint = "🤖 E / AÇÃO • Falar com ARIA (missões)"
+			"bed":
+				hint = "🛏 E / AÇÃO • Dormir até o amanhecer" if _is_night() else "🛏 O beliche serve para dormir à noite"
+			"console":
+				hint = GameManager.t("ending_console_hint") if GameManager.missions_complete else "🚀 Console sem energia • conclua as missões"
+			_:
+				hint = GameManager.t("ending_console_go") if GameManager.missions_complete else "🚀 Interior da nave • console desligado • fale com ARIA"
 	elif _should_use_lake(mission, item):
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif item:
-		var verb: String = "Analisar" if mission.get("action", "") == "interact" else "Coletar"
-		hint = "E / AÇÃO • %s %s" % [verb, item.display_name()]
+		if item.tipo_item == "animal" and mission.get("action", "") != "interact":
+			hint = "⚔ E / AÇÃO • Atacar %s (%d/%d)" % [item.display_name(), int(ceil(item.health)), int(item.max_health)]
+		else:
+			var verb: String = "Analisar" if mission.get("action", "") == "interact" else "Coletar"
+			hint = "E / AÇÃO • %s %s" % [verb, item.display_name()]
 	elif _near_lake():
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif _near_ship_door():
@@ -1366,14 +1657,23 @@ func _on_jump_pressed() -> void:
 		player.velocity.y = player.JUMP_VELOCITY
 
 func _on_interact_pressed() -> void:
-	if paused or game_over:
+	if paused or game_over or ending_started:
 		return
-	if GameManager.missions_complete and _player_inside_ship():
-		if _near_ship_console():
-			_start_ending()
-		else:
+	if _player_inside_ship():
+		match _ship_station_nearby():
+			"robot":
+				_talk_to_robot()
+				return
+			"bed":
+				_sleep_in_bed()
+				return
+			"console":
+				if GameManager.missions_complete:
+					_start_ending()
+					return
+		if GameManager.missions_complete:
 			_show_popup(GameManager.t("ending_console_go"))
-		return
+			return
 	var m: Dictionary = GameManager.get_current_mission()
 	if m.get("action", "") == "report":
 		var done: bool = GameManager.register_action("report", "any")
@@ -1382,6 +1682,9 @@ func _on_interact_pressed() -> void:
 		_show_popup("Relatório entregue!" if done else "Relatório em andamento")
 		return
 	var item: Node3D = _nearest_item()
+	if item and item.tipo_item == "animal" and item.available and m.get("action", "") != "interact" and not _should_use_lake(m, item):
+		_attack_animal(item)
+		return
 	var target := ""
 	if item and not _should_use_lake(m, item):
 		target = item.tipo_item
@@ -1404,6 +1707,8 @@ func _on_interact_pressed() -> void:
 
 # --- Pause / Game Over ---
 func _toggle_pause() -> void:
+	if robot_panel != null and robot_panel.visible:
+		return
 	_clear_touch()
 	paused = not paused
 	pause_panel.visible = paused
@@ -1453,7 +1758,7 @@ func _snapshot() -> Dictionary:
 		"health": health,
 		"hunger": hunger, "thirst": thirst, "score": score,
 		"inventory": inventory.duplicate(true), "time_of_day": time_of_day,
-		"weather": weather, "weather_timer": weather_timer,
+		"day": day_count, "weather": weather, "weather_timer": weather_timer,
 		"world_seed": world_seed, "resource_cooldowns": cooldowns,
 		"singleplayer": GameManager.singleplayer, "role": GameManager.role,
 		"player": {
@@ -1495,6 +1800,7 @@ func _restore_snapshot(snapshot: Dictionary) -> void:
 	for type in ["mineral", "fruit", "plant", "crystal", "stone", "animal"]:
 		inventory[type] = maxi(0, int(saved_inventory.get(type, 0)))
 	time_of_day = clampf(snapshot.get("time_of_day", 0.3), 0.0, 1.0)
+	day_count = maxi(1, int(snapshot.get("day", 1)))
 	weather = snapshot.get("weather", "clear")
 	weather_timer = maxf(0.0, snapshot.get("weather_timer", 0.0))
 	var cooldowns: Array = snapshot.get("resource_cooldowns", [])

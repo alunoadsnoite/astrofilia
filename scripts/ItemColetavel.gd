@@ -10,6 +10,7 @@ signal collected(type: String)
 # ponto onde nasceu, sem entrar no lago nem na nave.
 @export var move_speed: float = 0.9
 @export var wander_radius: float = 3.4
+@export var max_health: float = 30.0
 @export var lake_center: Vector3 = Vector3(0, 0.15, 12)
 @export var ship_center: Vector3 = Vector3(-24, 0, 5)
 
@@ -20,6 +21,11 @@ var home_position := Vector3.ZERO
 var wander_direction := Vector3.ZERO
 var wander_timer := 0.0
 var hop_phase := 0.0
+var health := 30.0
+var temperament := "aggressive"
+var combat_state := "wander"
+var combat_timer := 0.0
+var attack_timer := 0.0
 var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
@@ -35,6 +41,8 @@ func _ready() -> void:
 	_rng.randomize()
 	home_position = position
 	if tipo_item == "animal":
+		health = max_health
+		temperament = "aggressive" if _rng.randf() < 0.6 else "skittish"
 		_pick_wander_direction()
 	else:
 		set_process(false)
@@ -42,6 +50,17 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if tipo_item != "animal" or not available:
 		return
+	attack_timer = maxf(0.0, attack_timer - delta)
+	if combat_state != "wander":
+		combat_timer -= delta
+		if combat_timer <= 0.0:
+			_calm_down()
+		elif combat_state == "chase":
+			_process_chase(delta)
+			return
+		elif combat_state == "flee":
+			_process_flee(delta)
+			return
 	wander_timer -= delta
 	if wander_timer <= 0.0:
 		_pick_wander_direction()
@@ -73,6 +92,89 @@ func _process(delta: float) -> void:
 	visual.rotation.y = lerp_angle(visual.rotation.y, atan2(wander_direction.x, wander_direction.z), clampf(delta * 7.0, 0.0, 1.0))
 	hop_phase += delta * 10.0
 	visual.position.y = absf(sin(hop_phase)) * 0.075
+
+func hit(damage: float, _attacker: Node3D = null) -> void:
+	if not available or tipo_item != "animal":
+		return
+	health = maxf(0.0, health - damage)
+	if health <= 0.0:
+		_die()
+		return
+	if temperament == "skittish" or health <= max_health * 0.34:
+		combat_state = "flee"
+		combat_timer = 6.0
+	else:
+		combat_state = "chase"
+		combat_timer = 7.0
+	attack_timer = 0.0
+	hop_phase = 0.0
+
+func _process_chase(delta: float) -> void:
+	var target := get_tree().get_first_node_in_group("player") as Node3D
+	if not is_instance_valid(target):
+		_calm_down()
+		return
+	var offset := target.global_position - global_position
+	offset.y = 0.0
+	var distance := offset.length()
+	var ship_offset := Vector2(target.global_position.x - ship_center.x, target.global_position.z - ship_center.z)
+	if distance > 13.0 or ship_offset.length() < 7.6:
+		_calm_down()
+		return
+	var direction := offset.normalized() if distance > 0.05 else Vector3.FORWARD
+	if distance > 1.45:
+		global_position = _step(direction, 2.35, delta)
+		visual.rotation.y = lerp_angle(visual.rotation.y, atan2(direction.x, direction.z), clampf(delta * 9.0, 0.0, 1.0))
+	elif attack_timer <= 0.0:
+		attack_timer = 1.3
+		var hud := get_tree().get_first_node_in_group("hud")
+		if hud and hud.has_method("hurt_player"):
+			hud.hurt_player(8.0, "🐗 Criatura")
+	hop_phase += delta * 14.0
+	visual.position.y = absf(sin(hop_phase)) * 0.12
+
+func _process_flee(delta: float) -> void:
+	var target := get_tree().get_first_node_in_group("player") as Node3D
+	var away := Vector3.FORWARD
+	if is_instance_valid(target):
+		var offset := global_position - target.global_position
+		offset.y = 0.0
+		if offset.length() > 0.05:
+			away = offset.normalized()
+		else:
+			away = Vector3(_rng.randf_range(-1.0, 1.0), 0.0, _rng.randf_range(-1.0, 1.0)).normalized()
+	# Foge em linha reta, mas respeita o lago, a nave e os limites do mapa.
+	global_position = _step(away, 3.1, delta)
+	visual.rotation.y = lerp_angle(visual.rotation.y, atan2(away.x, away.z), clampf(delta * 11.0, 0.0, 1.0))
+	hop_phase += delta * 18.0
+	visual.position.y = absf(sin(hop_phase)) * 0.14
+
+func _step(direction: Vector3, speed: float, delta: float) -> Vector3:
+	var next := global_position + direction * speed * delta
+	next = _keep_out(next)
+	next.x = clampf(next.x, -42.0, 42.0)
+	next.z = clampf(next.z, -42.0, 42.0)
+	next.y = home_position.y
+	return next
+
+func _calm_down() -> void:
+	combat_state = "wander"
+	combat_timer = 0.0
+	attack_timer = 0.0
+	wander_timer = 0.0
+	hop_phase = 0.0
+
+func _die() -> void:
+	var body := get_tree().get_first_node_in_group("player")
+	_calm_down()
+	health = max_health
+	if body != null:
+		collect(body)
+	else:
+		available = false
+		visual.hide()
+		collected.emit("animal")
+		respawn_timer.start(12.0)
 
 func _pick_wander_direction() -> void:
 	wander_timer = _rng.randf_range(1.4, 3.8)
@@ -119,6 +221,10 @@ func _respawn() -> void:
 		visual.position.y = 0.0
 		wander_direction = Vector3.ZERO
 		wander_timer = 0.0
+		health = max_health
+		combat_state = "wander"
+		combat_timer = 0.0
+		attack_timer = 0.0
 	visual.show()
 
 func display_name() -> String:
@@ -198,6 +304,8 @@ func collect(body: Node3D) -> void:
 	if not available or not body.is_in_group("player"):
 		return
 	available = false
+	combat_state = "wander"
+	combat_timer = 0.0
 	visual.hide()
 	if body.has_method("add_score"):
 		body.add_score(10)
