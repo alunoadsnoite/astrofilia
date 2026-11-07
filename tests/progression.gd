@@ -18,6 +18,8 @@ func run_checks() -> void:
 	manager.experience = 0
 	manager.level = 1
 	manager.xp_to_next_level = 100
+	manager.in_interior = false
+	manager.pending_snapshot.clear()
 
 	var scene = load("res://scenes/Gameplay.tscn").instantiate()
 	root.add_child(scene)
@@ -74,102 +76,51 @@ func run_checks() -> void:
 	scene._restore_snapshot(final_snapshot)
 	check(manager.missions_complete and manager.current_mission_index == manager.mission_list.size(), "completed game stays completed after restoring a save")
 	check(scene.mission_label.text == "Volte para casa! Ative o console da nave", "final mission message survives save/load")
-	manager.missions_complete = false
 
-	# Desfecho: só ativa com todas as missões concluídas e no console da nave.
-	var ending_return_pos: Vector3 = scene.player.global_position
-	var console_pos: Vector3 = scene.ship_position + Vector3(0, 1.2, -3.85)
-	scene.player.global_position = console_pos
+	# Desfecho: agora só existe dentro da nave, no console.
 	manager.missions_complete = false
+	scene.player.global_position = scene.ship_position + Vector3(0, 1.4, 0)
 	scene._start_ending()
 	check(not scene.ending_started, "ending does not start before all missions are complete")
-	check(not scene.ending_overlay.visible and not scene.ending_panel.visible, "ending panel stays hidden before completion")
 	manager.missions_complete = true
-	check(scene._player_inside_ship(), "player can reach the ship console")
-	check(scene._near_ship_console(), "console interaction triggers when the player is close")
 	scene._start_ending()
-	check(scene.ending_started, "ending starts at the console after all missions")
-	check(scene.ending_overlay.visible and scene.ending_panel.visible, "ending overlay and panel become visible")
-	check(scene.ending_title.text == "DE VOLTA AO LAR", "ending title is translated")
-	check(scene.ending_stats.text.contains("Missões: 16/16"), "ending shows completed missions")
-	check(scene.ending_stats.text.contains("Nível"), "ending shows the player level")
-	check(manager.achievements.has("Voltou para casa"), "ending unlocks the home achievement")
-	check(scene.ending_stats.text.contains("Recursos"), "ending shows collected resources")
-	check(scene.paused and not scene.player.is_physics_processing(), "ending pauses gameplay")
-	scene._close_ending()
-	check(not scene.ending_started and not scene.ending_panel.visible, "closing the ending hides the panel")
-	check(not scene.paused and scene.player.is_physics_processing(), "closing the ending resumes gameplay")
-	scene.player.global_position = scene.ship_position + Vector3(0, 1.4, 0)
-	scene._update_hint()
-	check("console" in scene.get_node("CanvasLayer/HUD/HintLabel").text.to_lower(), "hint points to the console after completion")
+	check(not scene.ending_started, "ending cannot start from the planet exterior")
+	check(not scene.ending_overlay.visible and not scene.ending_panel.visible, "ending panel stays hidden outside the ship")
 	manager.missions_complete = false
-	scene.player.global_position = ending_return_pos
-
-	# Robô ARIA e beliche dentro da nave.
 	manager.current_mission_index = 0
-	manager.current_mission_progress = 0
-	scene._update_mission()
-	check(scene.robot_root != null and scene.robot_root.name == "MissionRobot", "mission robot exists inside the ship")
-	check(scene.bed_root != null and scene.bed_root.name == "BunkBed", "bunk bed exists inside the ship")
-	check(scene.robot_root.position.distance_to(Vector3(-1.5, 0.585, -1.9)) < 0.01, "robot stands on the ship floor")
-	check(scene.bed_root.position.distance_to(Vector3(1.47, 0.585, 1.9)) < 0.01, "bunk bed stands on the ship floor")
-	scene.player.global_position = scene.robot_position
-	check(scene._near_robot(), "player can reach the mission robot")
-	check(scene._ship_station_nearby() == "robot", "robot is the nearest ship station")
-	scene._talk_to_robot()
-	check(scene.robot_panel.visible, "robot dialog opens")
-	check(scene.paused and not scene.player.is_physics_processing(), "robot dialog pauses gameplay")
-	check("Missão" in scene.robot_body_label.text, "robot shows the current mission")
-	check(manager.achievements.has("Contato com ARIA"), "talking to ARIA unlocks an achievement")
-	scene._close_robot_dialog()
-	check(not scene.robot_panel.visible and not scene.paused, "closing the robot dialog resumes gameplay")
 
-	scene.player.global_position = scene.bed_position
-	check(scene._near_bed(), "player can reach the bunk bed")
-	scene.time_of_day = 0.92
-	var day_before_sleep: int = scene.day_count
-	scene.health = 40.0
-	scene._sleep_in_bed()
-	check(scene.time_of_day > 0.2 and scene.time_of_day < 0.35, "sleeping wakes the player at dawn")
-	check(scene.day_count == day_before_sleep + 1, "sleeping past midnight advances the day")
-	check(scene.health > 40.0, "sleeping restores health")
-	scene.time_of_day = 0.5
-	var day_before_nap: int = scene.day_count
-	scene._sleep_in_bed()
-	check(scene.day_count == day_before_nap and is_equal_approx(scene.time_of_day, 0.5), "the bed cannot be used during the day")
-	check(int(scene._snapshot().get("day", 0)) == scene.day_count, "day counter is stored in the save")
-
-	# Combate: criaturas revidam ou fogem, podem ferir e ser derrotadas.
-	var beast: Node3D = null
+	# Cobras noturnas: nó separado de Items, ativas só à noite.
+	check(scene.snake_root != null and scene.snake_root.name == "Snakes", "snakes live in their own node")
+	check(scene.snakes.size() == 5, "five night snakes are spawned")
+	var animal_count := 0
 	for creature in scene.items_node.get_children():
-		if creature.tipo_item == "animal" and creature.available:
-			beast = creature
-			break
-	check(beast != null, "a creature is available to fight")
-	beast.temperament = "skittish"
-	beast.health = beast.max_health
-	beast.hit(10.0, scene.player)
-	check(beast.health < beast.max_health, "attacks reduce creature health")
-	check(beast.combat_state == "flee", "a skittish creature flees after being hit")
-	beast.temperament = "aggressive"
-	beast.health = beast.max_health
-	beast.hit(10.0, scene.player)
-	check(beast.combat_state == "chase", "an aggressive creature retaliates")
-	scene.player.global_position = ending_return_pos
-	beast.global_position = scene.player.global_position + Vector3(1.0, 0, 0)
-	beast.combat_state = "chase"
-	beast.combat_timer = 5.0
-	beast.attack_timer = 0.0
+		if creature.tipo_item == "animal":
+			animal_count += 1
+	check(animal_count == 5, "snakes do not change the five creatures in Items")
+	var snake: Node3D = scene.snakes[0]
+	scene.time_of_day = 0.5
+	scene.player.global_position = snake.global_position + Vector3(1.0, 0, 0)
+	scene._update_snakes(0.0)
+	check(not snake.active, "snakes stay hidden during the day")
+	scene.time_of_day = 0.0
+	scene._update_snakes(0.0)
+	check(snake.active, "snakes wake up at night near the player")
 	scene.damage_cooldown = 0.0
-	var health_before_bite: float = scene.health
-	beast._process_chase(0.1)
-	check(scene.health < health_before_bite, "a retaliating creature damages the player")
-	beast.combat_state = "wander"
-	beast.health = beast.max_health
-	beast.hit(999.0, scene.player)
-	check(not beast.available, "a defeated creature drops meat")
-	beast._respawn()
-	check(beast.available and is_equal_approx(beast.health, beast.max_health), "defeated creatures respawn with full health")
+	snake.attack_timer = 0.0
+	var health_before_snake: float = scene.health
+	snake._process(0.1)
+	check(scene.health < health_before_snake, "a night snake bites a nearby player")
+	var snake_health: float = snake.health
+	scene._attack_snake(snake)
+	check(snake.health < snake_health, "the player can fight back against a snake")
+	scene._attack_snake(snake)
+	check(not snake.active and not snake.visible, "a defeated snake disappears")
+	check(manager.achievements.has("Caçador de cobras"), "defeating a snake unlocks an achievement")
+	snake._respawn()
+	check(snake.health == snake.max_health, "snakes respawn with full health")
+	scene.time_of_day = 0.5
+	scene._update_snakes(0.0)
+	check(not snake.active, "snakes hide again when day returns")
 
 	# Limite do planeta: paredes invisíveis e recuperação da gravidade.
 	check(scene.boundary_body != null and scene.boundary_body.get_child_count() == 4, "planet boundary has four invisible walls")
@@ -186,7 +137,6 @@ func run_checks() -> void:
 	scene.player.global_position = Vector3(80, 1, 0)
 	scene._update_planet_bounds()
 	check(absf(scene.player.global_position.x) <= 43.6, "astronaut cannot stay outside the planet area")
-	scene.player.global_position = ending_return_pos
 
 	# HUD de sobrevivência com porcentagem.
 	scene.hunger = 53.4
@@ -247,27 +197,20 @@ func run_checks() -> void:
 	check(lake_shape.radius >= 5.2 and lake_shape.height >= 3.0, "lake blocker covers the water and cannot be jumped over")
 	check(absf(scene.lake_blocker.position.x - scene.lake_position.x) < 0.01 and absf(scene.lake_blocker.position.z - scene.lake_position.z) < 0.01, "lake blocker is centred on the lake")
 
-	# Nave no chão, com porta, rampa, interior e teto que some para a câmera.
+	# Nave no chão: o casco exterior fica fechado e a entrada é automática.
 	check(scene.ship_root != null and scene.ship_root.is_in_group("ship"), "ship exists on the ground")
 	check(absf(scene.ship_root.position.y) < 0.01, "ship sits on the planet floor")
 	check(scene.ship_body != null and scene.ship_body.get_child_count() >= 8, "ship has wall and floor colliders")
 	check(scene.ship_root.get_node_or_null("Ramp") != null and scene.ship_root.get_node_or_null("Ramp/RampBody") != null, "ship has a walkable ramp")
-	check(scene.ship_roof != null and scene.ship_roof.name == "ShipRoof", "ship roof is a separate node")
-	check(not scene._player_inside_ship(), "player starts outside the ship")
-	var old_player_pos: Vector3 = scene.player.global_position
-	scene.player.global_position = scene.ship_position + Vector3(0, 1.4, 0)
-	check(scene._player_inside_ship(), "player can stand inside the ship")
-	scene._update_ship_interior(0.4)
-	scene._update_ship_interior(0.4)
-	check(scene.ship_roof.transparency > 0.4, "ship roof fades out while the player is inside")
-	scene._update_hint()
-	check("Interior da nave" in scene.get_node("CanvasLayer/HUD/HintLabel").text, "hint explains the empty ship interior")
-	scene.player.global_position = scene.ship_position + Vector3(0, 1.0, 12.0)
-	for i in range(8):
-		scene._update_ship_interior(0.4)
-	check(scene.ship_roof.transparency < 0.2, "ship roof becomes solid again after leaving")
-	check(scene._near_ship_door() == false, "ship door hint only appears near the entrance")
-	scene.player.global_position = old_player_pos
+	check(scene.ship_root.get_node_or_null("Airlock") != null, "ship keeps a closed airlock on the exterior")
+	check(not scene._player_inside_ship(), "walking under the hull does not count as the interior")
+	check(not scene._near_ship_entrance(), "player is far from the ship entrance")
+	scene.player.global_position = scene.ship_position + Vector3(0, 1.05, 4.0)
+	check(scene._near_ship_entrance(), "door area is detected at the top of the ramp")
+	check(scene._near_ship_door(), "ship door hint appears near the entrance")
+	check(not scene._near_ship_console(), "console only works inside the interior scene")
+	scene.player.global_position = scene.ship_position + Vector3(6, 1.0, 12.0)
+	check(not scene._near_ship_door(), "ship door hint disappears away from the ship")
 
 	# Animais se movem, voltam para casa e não atravessam o lago.
 	var animals: Array = []
@@ -294,9 +237,128 @@ func run_checks() -> void:
 		animal._process(0.1)
 	var lake_distance := Vector2(animal.global_position.x - scene.lake_position.x, animal.global_position.z - scene.lake_position.z).length()
 	check(lake_distance >= 6.5, "creature cannot enter the lake")
-	# Devolve a criatura ao ponto inicial para não afetar outros testes.
 	animal.global_position = animal_start
 	animal.wander_direction = Vector3.ZERO
 
+	# Combate: criaturas revidam ou fogem, podem ferir e ser derrotadas.
+	var beast: Node3D = null
+	for creature in scene.items_node.get_children():
+		if creature.tipo_item == "animal" and creature.available:
+			beast = creature
+			break
+	check(beast != null, "a creature is available to fight")
+	beast.temperament = "skittish"
+	beast.health = beast.max_health
+	beast.hit(10.0, scene.player)
+	check(beast.health < beast.max_health, "attacks reduce creature health")
+	check(beast.combat_state == "flee", "a skittish creature flees after being hit")
+	beast.temperament = "aggressive"
+	beast.health = beast.max_health
+	beast.hit(10.0, scene.player)
+	check(beast.combat_state == "chase", "an aggressive creature retaliates")
+	beast.combat_state = "wander"
+	beast.health = beast.max_health
+	beast.hit(999.0, scene.player)
+	check(not beast.available, "a defeated creature drops meat")
+	beast._respawn()
+	check(beast.available and is_equal_approx(beast.health, beast.max_health), "defeated creatures respawn with full health")
+
+	scene.queue_free()
+	await process_frame
+
+	# --- Interior: a nave é um cenário separado ---
+	manager.in_interior = true
+	manager.pending_snapshot.clear()
+	var inside = load("res://scenes/Gameplay.tscn").instantiate()
+	root.add_child(inside)
+	await process_frame
+	inside.set_process(false)
+	inside.player.set_physics_process(false)
+
+	check(inside._is_interior(), "GameManager opens the ship interior scene")
+	check(inside.interior_root != null and inside.interior_root.name == "ShipInterior", "interior room is built")
+	check(not inside.get_node("Ground").visible, "planet ground is hidden inside the ship")
+	check(inside.items_node.get_child_count() == 0, "the interior has no planet resources")
+	check(inside.snake_root == null and inside.snakes.is_empty(), "no snakes spawn inside the ship")
+	check(not inside._near_ship_entrance(), "the exterior entrance does not exist inside")
+	check(inside._player_inside_ship(), "_player_inside_ship is true in the interior scene")
+	check(inside.player.global_position.distance_to(inside.INTERIOR_SPAWN) < 0.1, "player spawns at the interior hatch")
+
+	# Console no fundo da sala.
+	inside.player.global_position = inside.console_position
+	check(inside._near_ship_console(), "console interaction triggers when the player is close")
+	manager.missions_complete = true
+	inside._start_ending()
+	check(inside.ending_started, "ending starts at the console after all missions")
+	check(inside.ending_overlay.visible and inside.ending_panel.visible, "ending overlay and panel become visible")
+	check(inside.ending_title.text == "DE VOLTA AO LAR", "ending title is translated")
+	check(inside.ending_stats.text.contains("Missões: 16/16"), "ending shows completed missions")
+	check(inside.ending_stats.text.contains("Nível"), "ending shows the player level")
+	check(manager.achievements.has("Voltou para casa"), "ending unlocks the home achievement")
+	check(inside.ending_stats.text.contains("Recursos"), "ending shows collected resources")
+	check(inside.paused and not inside.player.is_physics_processing(), "ending pauses gameplay")
+	inside._close_ending()
+	check(not inside.ending_started and not inside.ending_panel.visible, "closing the ending hides the panel")
+	check(not inside.paused and inside.player.is_physics_processing(), "closing the ending resumes gameplay")
+
+	# ARIA e beliche dentro da sala.
+	manager.missions_complete = false
+	manager.current_mission_index = 0
+	manager.current_mission_progress = 0
+	inside._update_mission()
+	check(inside.robot_root != null and inside.robot_root.name == "MissionRobot", "mission robot lives inside the ship")
+	check(inside.bed_root != null and inside.bed_root.name == "BunkBed", "bunk bed lives inside the ship")
+	check(inside.robot_root.position.distance_to(Vector3(-3.2, 0.10, -2.4)) < 0.02, "robot stands in the interior room")
+	check(inside.bed_root.position.distance_to(Vector3(3.15, 0.10, 1.5)) < 0.01, "bunk bed stands in the interior room")
+	inside.player.global_position = inside.robot_position
+	check(inside._near_robot(), "player can reach the mission robot")
+	check(inside._ship_station_nearby() == "robot", "robot is the nearest ship station")
+	inside._talk_to_robot()
+	check(inside.robot_panel.visible, "robot dialog opens")
+	check(inside.paused and not inside.player.is_physics_processing(), "robot dialog pauses gameplay")
+	check("Missão" in inside.robot_body_label.text, "robot shows the current mission")
+	check(manager.achievements.has("Contato com ARIA"), "talking to ARIA unlocks an achievement")
+	inside._close_robot_dialog()
+	check(not inside.robot_panel.visible and not inside.paused, "closing the robot dialog resumes gameplay")
+
+	inside.player.global_position = inside.bed_position
+	check(inside._near_bed(), "player can reach the bunk bed")
+	inside.time_of_day = 0.92
+	var day_before_sleep: int = inside.day_count
+	inside.health = 40.0
+	inside._sleep_in_bed()
+	check(inside.time_of_day > 0.2 and inside.time_of_day < 0.35, "sleeping wakes the player at dawn")
+	check(inside.day_count == day_before_sleep + 1, "sleeping past midnight advances the day")
+	check(inside.health > 40.0, "sleeping restores health")
+	inside.time_of_day = 0.5
+	var day_before_nap: int = inside.day_count
+	inside._sleep_in_bed()
+	check(inside.day_count == day_before_nap and is_equal_approx(inside.time_of_day, 0.5), "the bed cannot be used during the day")
+	check(int(inside._snapshot().get("day", 0)) == inside.day_count, "day counter is stored in the save")
+
+	# Nada de clima, sol ou estrelas dentro da nave.
+	inside._update_day_night()
+	check(not inside.sun.visible, "sunlight is disabled inside the ship")
+	check(not is_instance_valid(inside.moon_light) or not inside.moon_light.visible, "moonlight is disabled inside the ship")
+	check(not is_instance_valid(inside.stars_instance) or not inside.stars_instance.visible, "stars are disabled inside the ship")
+	check(inside._is_interior() and (inside.rain_fx == null or not inside.rain_fx.emitting), "weather effects are disabled inside the ship")
+
+	# Escotilha de saída.
+	inside.player.global_position = inside.exit_hatch_position
+	check(inside._near_exit_hatch(), "player can reach the exit hatch")
+	check(inside._ship_station_nearby() == "hatch", "hatch is the nearest ship station")
+	inside._update_hint()
+	check("Sair da nave" in inside.get_node("CanvasLayer/HUD/HintLabel").text, "hint explains how to leave the ship")
+	inside._exit_ship(false)
+	check(not manager.in_interior and not inside._is_interior(), "leaving the hatch switches back to the planet")
+	var exit_snapshot: Dictionary = manager.pending_snapshot
+	check(bool(exit_snapshot.get("in_interior", true)) == false, "interior flag is saved as false on exit")
+	var saved_exit: Array = exit_snapshot.get("position", [])
+	check(saved_exit.size() == 3 and Vector3(saved_exit[0], saved_exit[1], saved_exit[2]).distance_to(inside.ship_position + Vector3(0, 1.05, 6.0)) < 0.01, "player leaves at the top of the ramp")
+	check(manager.interior_snapshot.is_empty(), "interior snapshot is cleared after leaving")
+	manager.pending_snapshot.clear()
+
+	inside.queue_free()
+	await process_frame
 	print("CHECKS COMPLETE: %d failures" % failures.size())
-	quit()
+	quit(0 if failures.is_empty() else 1)

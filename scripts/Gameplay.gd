@@ -24,10 +24,9 @@ extends Node3D
 @onready var gameover_panel: Panel = $CanvasLayer/GameOverPanel
 @onready var sun: DirectionalLight3D = $Sun
 @onready var touch_controls: Control = $CanvasLayer/TouchControls
-@onready var left_button: Button = $CanvasLayer/TouchControls/DPad/LeftButton
-@onready var right_button: Button = $CanvasLayer/TouchControls/DPad/RightButton
-@onready var up_button: Button = $CanvasLayer/TouchControls/DPad/UpButton
-@onready var down_button: Button = $CanvasLayer/TouchControls/DPad/DownButton
+@onready var joystick: Control = $CanvasLayer/TouchControls/Joystick
+@onready var joystick_base: Control = $CanvasLayer/TouchControls/Joystick/Base
+@onready var joystick_knob: Control = $CanvasLayer/TouchControls/Joystick/Base/Knob
 @onready var jump_button: Button = $CanvasLayer/TouchControls/JumpButton
 @onready var interact_button: Button = $CanvasLayer/TouchControls/InteractButton
 @onready var pause_button: Button = $CanvasLayer/HUD/PauseButton
@@ -114,28 +113,64 @@ var lake_blocker: StaticBody3D
 var lake_collider: CollisionShape3D
 var sky_features: Node3D
 
+# Otimização: o mesmo projeto mantém os gráficos no desktop e reduz o custo
+# no Android (sombras, densidade de cenário, partículas e resolução 3D).
+var low_end: bool = OS.has_feature("mobile")
+const INTERIOR_SPAWN := Vector3(0, 1.05, 1.6)
+const INTERIOR_EXIT := Vector3(0, 1.05, 3.9)
+const INTERIOR_CONSOLE := Vector3(0, 1.2, -4.55)
+var interior_root: Node3D
+var interior_lights: Array[Light3D] = []
+var console_position: Vector3 = Vector3(0, 1.2, -4.55)
+var exit_hatch_position: Vector3 = INTERIOR_EXIT
+var exterior_return: Vector3 = Vector3(-24, 1.0, 9.5)
+var exterior_cooldowns: Array = []
+var exterior_day: int = 1
+var transitioning: bool = false
+var enter_guard: float = 0.0
+
+# Cobras noturnas da floresta.
+var snake_root: Node3D
+var snakes: Array[Node3D] = []
+var snake_scene := preload("res://scripts/Snake.gd")
+
+# Joystick analógico de 360 graus.
+var joystick_index: int = -1
+var joystick_vector: Vector2 = Vector2.ZERO
+const JOYSTICK_DEADZONE := 0.12
+
 func _ready() -> void:
 	add_to_group("hud")
 	if GameManager.mission_list.is_empty():
 		GameManager.build_mission_list()
-	world_seed = GameManager.pending_snapshot.get("world_seed", randi())
+	var incoming: Dictionary = GameManager.pending_snapshot
+	GameManager.in_interior = GameManager.in_interior or bool(incoming.get("in_interior", false))
+	world_seed = int(incoming.get("world_seed", randi()))
 	scenery_rng.seed = world_seed
+	exterior_return = _vec3_from(incoming.get("interior_return", [ship_position.x, 1.0, ship_position.z + 5.0]))
+	exterior_cooldowns = incoming.get("exterior_cooldowns", incoming.get("resource_cooldowns", []))
+	exterior_day = maxi(1, int(incoming.get("day", 1)))
 	_setup_visuals()
-	_spawn_items()
-	_create_biomes()
-	_create_boundary()
-	_add_lighting()
-	_create_weather_fx()
-	_create_lake()
-	_create_sky_features()
-	_create_ship()
-	_create_crew_quarters()
-	_create_landmarks()
+	if GameManager.in_interior:
+		_build_interior_world()
+		if incoming.is_empty():
+			player.global_position = INTERIOR_SPAWN
+	else:
+		_spawn_items()
+		_create_biomes()
+		_create_boundary()
+		_add_lighting()
+		_create_weather_fx()
+		_create_lake()
+		_create_sky_features()
+		_create_ship()
+		_create_snakes()
+		_create_landmarks()
 	_setup_extra_ui()
 	_setup_touch()
-	_restore_snapshot(GameManager.pending_snapshot)
+	_restore_snapshot(incoming)
 	GameManager.pending_snapshot.clear()
-	if weather_timer <= 0.0:
+	if not GameManager.in_interior and weather_timer <= 0.0:
 		weather_timer = randf_range(20.0, 40.0)
 	_update_day_night()
 	_update_mission()
@@ -145,6 +180,9 @@ func _ready() -> void:
 	_update_weather_fx(0.0)
 	_update_time_label()
 	_check_chapter()
+	if low_end:
+		# Depois de montar o mundo, garante que nenhum cenário projete sombra.
+		_disable_mobile_shadows()
 	# Auto-save timer
 	var timer := Timer.new()
 	timer.wait_time = 10.0
@@ -166,9 +204,26 @@ func _ready() -> void:
 	if GameManager.active_slot >= 0:
 		_autosave()
 
+func _disable_mobile_shadows() -> void:
+	for node in find_children("*", "MeshInstance3D", true, false):
+		if is_instance_valid(player) and player.is_ancestor_of(node):
+			continue
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+func _is_interior() -> bool:
+	return GameManager.in_interior
+
+func _vec3_from(value: Variant, fallback: Vector3 = Vector3.ZERO) -> Vector3:
+	if value is Array and value.size() == 3:
+		return Vector3(float(value[0]), float(value[1]), float(value[2]))
+	elif value is Vector3:
+		return value
+	return fallback
+
 func _process(delta: float) -> void:
 	if paused or game_over:
 		return
+	enter_guard = maxf(0.0, enter_guard - delta)
 	# Ciclo de dia e noite (conta os dias ao atravessar a meia-noite).
 	var previous_time := time_of_day
 	time_of_day = fmod(time_of_day + day_speed * delta, 1.0)
@@ -201,21 +256,26 @@ func _process(delta: float) -> void:
 	if health <= 0:
 		_trigger_game_over()
 	# Weather timer
-	weather_timer -= delta
-	if weather_timer <= 0:
-		_change_weather()
-	# Camera follow
+	if not _is_interior():
+		weather_timer -= delta
+		if weather_timer <= 0:
+			_change_weather()
+	# Camera follow (o interior usa um enquadramento mais próximo).
 	if player:
-		var target := player.global_position + Vector3(0, 12, 14)
+		var cam_offset := Vector3(0, 6.4, 8.4) if _is_interior() else Vector3(0, 12, 14)
+		var target := player.global_position + cam_offset
 		camera.global_position = camera.global_position.lerp(target, 1.0 - exp(-8.0 * delta))
 		camera.look_at(player.global_position, Vector3.UP)
-	_update_ship_interior(delta)
+	if not _is_interior():
+		_update_ship_interior(delta)
+		_update_planet_bounds()
+		_update_weather_fx(delta)
+		_update_snakes(delta)
+		_check_ship_entry()
 	if is_instance_valid(robot_root):
 		var clock := Time.get_ticks_msec() * 0.001
 		robot_root.rotation.y = sin(clock * 0.9) * 0.12
-		robot_root.position.y = 0.585 + sin(clock * 1.6) * 0.015
-	_update_planet_bounds()
-	_update_weather_fx(delta)
+		robot_root.position.y = 0.1 + sin(clock * 1.6) * 0.015
 	_update_mission()
 	_check_chapter()
 	_update_hint()
@@ -227,6 +287,28 @@ func _update_day_night() -> void:
 	var angle := time_of_day * TAU
 	var daylight := clampf(-cos(angle), 0.0, 1.0)
 	var night := 1.0 - daylight
+	if _is_interior():
+		# O interior tem iluminação própria; o ciclo apenas a suaviza à noite.
+		sun.visible = false
+		var inside_env: Environment = $WorldEnvironment.environment
+		inside_env.background_mode = Environment.BG_COLOR
+		inside_env.background_color = Color("05070d")
+		inside_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		inside_env.ambient_light_color = Color("93a9c9").lerp(Color("d6e6ef"), daylight)
+		inside_env.ambient_light_energy = lerpf(0.38, 0.56, daylight)
+		inside_env.fog_enabled = false
+		if not low_end:
+			inside_env.glow_enabled = true
+		for light in interior_lights:
+			if is_instance_valid(light):
+				var base_energy: float = float(light.get_meta("base_energy", light.light_energy))
+				light.light_energy = base_energy * lerpf(0.72, 1.0, daylight)
+		if is_instance_valid(stars_instance):
+			stars_instance.visible = false
+		if is_instance_valid(moon_light):
+			moon_light.visible = false
+		return
+	sun.visible = true
 	# O sol percorre o céu para gerar sombras que mudam ao longo do dia.
 	sun.rotation = Vector3(-deg_to_rad(18.0 + daylight * 68.0), deg_to_rad(35.0), 0.0)
 	sun.light_energy = lerpf(0.04, 1.3, daylight)
@@ -368,6 +450,73 @@ func _spawn_items() -> void:
 		it.collected.connect(_on_item_collected)
 		items_node.add_child(it)
 
+func _create_snakes() -> void:
+	# Cobras vivem em um nó separado de Items: a contagem de recursos e as
+	# missões de coleta continuam exatamente como antes.
+	snake_root = Node3D.new()
+	snake_root.name = "Snakes"
+	add_child(snake_root)
+	var spots := [
+		Vector3(-8.0, 0.18, -12.0),
+		Vector3(8.0, 0.18, -9.5),
+		Vector3(-7.5, 0.18, 1.5),
+		Vector3(7.0, 0.18, 4.0),
+		Vector3(0.0, 0.18, -14.5),
+	]
+	var limit := spots.size() if not low_end else 4
+	for i in range(limit):
+		var snake: Node3D = snake_scene.new()
+		snake.name = "Snake%d" % i
+		snake.position = spots[i]
+		snake.lake_center = lake_position
+		snake.ship_center = ship_position
+		snake.defeated.connect(_on_snake_defeated)
+		snake_root.add_child(snake)
+		snakes.append(snake)
+		# As cobras só acordam à noite; durante o dia ficam escondidas.
+		snake.set_active(false)
+
+func _update_snakes(_delta: float) -> void:
+	if snakes.is_empty() or not is_instance_valid(player):
+		return
+	var night := _is_night()
+	for snake in snakes:
+		if not is_instance_valid(snake):
+			continue
+		if snake.health <= 0.0:
+			continue
+		var should := night and player.global_position.distance_to(snake.global_position) < 30.0
+		if should != snake.active:
+			snake.set_active(should)
+
+func _nearest_snake() -> Node3D:
+	var nearest: Node3D = null
+	var best := 2.35
+	for snake in snakes:
+		if not is_instance_valid(snake) or not snake.active or snake.health <= 0.0:
+			continue
+		var d: float = player.global_position.distance_to(snake.global_position)
+		if d < best:
+			best = d
+			nearest = snake
+	return nearest
+
+func _attack_snake(snake: Node3D) -> void:
+	if not is_instance_valid(snake) or not snake.active:
+		return
+	snake.hit(12.0, player)
+	Sfx.play("click")
+	if snake.health <= 0.0:
+		_gain_xp(12)
+		set_score(score + 15)
+		_show_popup("🐍 Cobra derrotada! O caminho da floresta está mais seguro.")
+	else:
+		_gain_xp(4)
+		_show_popup("⚔ Cobra %d/%d ❤ • ela vai dar o bote!" % [int(ceil(snake.health)), int(snake.max_health)])
+
+func _on_snake_defeated() -> void:
+	GameManager.add_achievement("Caçador de cobras")
+
 func _on_item_collected(type: String) -> void:
 	Sfx.play("collect")
 	inventory[type] = inventory.get(type, 0) + 1
@@ -446,8 +595,8 @@ func _create_biomes() -> void:
 	ground.name = "BiomeGround"
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(90, 90)
-	plane.subdivide_width = 40
-	plane.subdivide_depth = 40
+	plane.subdivide_width = 16 if low_end else 40
+	plane.subdivide_depth = 16 if low_end else 40
 	ground.mesh = plane
 	ground.position = Vector3(0, 0.02, 0)
 	var material := ShaderMaterial.new()
@@ -484,7 +633,7 @@ func _near_ship(pos: Vector3, radius: float = 8.5) -> bool:
 
 func _build_desert_props() -> void:
 	# Cactos com braços laterais.
-	for i in range(7):
+	for i in range(_n(7)):
 		var base := Vector3(scenery_rng.randf_range(-38.0, -17.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
 		if _near_ship(base):
 			continue
@@ -504,7 +653,7 @@ func _build_desert_props() -> void:
 			var arm_node := _prop(arm, Color("58a05f"), base + Vector3(side * 0.42, h * 0.6, 0))
 			arm_node.rotation.z = side * deg_to_rad(72)
 	# Pedras e cascalho.
-	for i in range(14):
+	for i in range(_n(14)):
 		var rock := SphereMesh.new()
 		rock.radius = scenery_rng.randf_range(0.25, 0.9)
 		rock.height = rock.radius * scenery_rng.randf_range(0.9, 1.6)
@@ -514,7 +663,7 @@ func _build_desert_props() -> void:
 			continue
 		_prop(rock, Color("a9614a").lightened(scenery_rng.randf_range(0.0, 0.2)), rock_pos, Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
 	# Tufos de capim seco.
-	for i in range(26):
+	for i in range(_n(26)):
 		var tuft := CylinderMesh.new()
 		tuft.top_radius = 0.0
 		tuft.bottom_radius = 0.09
@@ -527,7 +676,7 @@ func _build_desert_props() -> void:
 
 func _build_forest_props() -> void:
 	# Árvores com copa em camadas (fora do lago).
-	for i in range(14):
+	for i in range(_n(14)):
 		var off := Vector3(scenery_rng.randf_range(-10.0, 10.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
 		if Vector2(off.x - lake_position.x, off.z - lake_position.z).length() < 7.5:
 			continue
@@ -546,7 +695,7 @@ func _build_forest_props() -> void:
 			crown.rings = 6
 			_prop(crown, Color("4f9c68").lightened(layer * 0.07 + scenery_rng.randf_range(0.0, 0.08)), off + Vector3(0, h + layer * 0.55, 0), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
 	# Arbustos.
-	for i in range(12):
+	for i in range(_n(12)):
 		var bush := SphereMesh.new()
 		bush.radius = scenery_rng.randf_range(0.45, 0.8)
 		bush.height = bush.radius * 1.25
@@ -556,7 +705,7 @@ func _build_forest_props() -> void:
 			continue
 		_prop(bush, Color("3f8556").lightened(scenery_rng.randf_range(0.0, 0.12)), bpos, Vector3(1.0, 0.8, 1.0), scenery_rng.randf_range(0.0, TAU))
 	# Cogumelos.
-	for i in range(9):
+	for i in range(_n(9)):
 		var mpos := Vector3(scenery_rng.randf_range(-9.0, 9.0), 0.0, scenery_rng.randf_range(-16.0, 16.0))
 		if Vector2(mpos.x - lake_position.x, mpos.z - lake_position.z).length() < 6.0:
 			continue
@@ -573,7 +722,7 @@ func _build_forest_props() -> void:
 		cap.radial_segments = 10
 		_prop(cap, Color("d8564f") if i % 2 == 0 else Color("c98a4b"), mpos + Vector3(0, stem_h, 0), Vector3(1.0, 0.7, 1.0))
 	# Tufos de grama.
-	for i in range(30):
+	for i in range(_n(30)):
 		var gpos := Vector3(scenery_rng.randf_range(-10.0, 10.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
 		if Vector2(gpos.x - lake_position.x, gpos.z - lake_position.z).length() < 6.0:
 			continue
@@ -586,7 +735,7 @@ func _build_forest_props() -> void:
 
 func _build_snow_props() -> void:
 	# Pinheiros nevados.
-	for i in range(9):
+	for i in range(_n(9)):
 		var base := Vector3(scenery_rng.randf_range(17.0, 38.0), 0.0, scenery_rng.randf_range(-17.0, 17.0))
 		var h := scenery_rng.randf_range(2.0, 3.2)
 		var trunk := CylinderMesh.new()
@@ -603,7 +752,7 @@ func _build_snow_props() -> void:
 			cone.radial_segments = 7
 			_prop(cone, Color("e8f6ff").lightened(layer * 0.03), base + Vector3(0, h * 0.75 + layer * 0.62, 0), Vector3.ONE, scenery_rng.randf_range(0.0, TAU))
 	# Cristais de gelo com brilho sutil.
-	for i in range(8):
+	for i in range(_n(8)):
 		var crystal := CylinderMesh.new()
 		crystal.top_radius = 0.0
 		crystal.bottom_radius = scenery_rng.randf_range(0.25, 0.5)
@@ -616,7 +765,7 @@ func _build_snow_props() -> void:
 			crystal_mat.emission = Color("74c5e8")
 			crystal_mat.emission_energy_multiplier = 0.35
 	# Montes de neve.
-	for i in range(12):
+	for i in range(_n(12)):
 		var drift := SphereMesh.new()
 		drift.radius = scenery_rng.randf_range(0.5, 1.2)
 		drift.height = drift.radius * 0.55
@@ -648,7 +797,7 @@ func _create_stars() -> void:
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
 	mm.mesh = sphere
-	mm.instance_count = 220
+	mm.instance_count = 130 if low_end else 220
 	for i in range(mm.instance_count):
 		var dir := Vector3(
 			scenery_rng.randf_range(-1.0, 1.0),
@@ -720,7 +869,7 @@ func _create_weather_fx() -> void:
 func _make_particles(mesh: Mesh, color: Color, amount: int, lifetime: float, extents: Vector3, vel_min: float, vel_max: float, gravity: Vector3, direction: Vector3, spread: float, scale_min: float, scale_max: float, offset: Vector3) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.mesh = mesh
-	p.amount = amount
+	p.amount = maxi(8, int(amount * (0.45 if low_end else 1.0)))
 	p.lifetime = lifetime
 	p.preprocess = lifetime
 	p.local_coords = true
@@ -744,7 +893,7 @@ func _update_weather_fx(_delta: float) -> void:
 	if weather_root == null or player == null:
 		return
 	weather_root.global_position = player.global_position
-	var active := not paused and not game_over
+	var active := not paused and not game_over and not _is_interior()
 	if is_instance_valid(rain_fx):
 		rain_fx.emitting = active and weather == "rain"
 	if is_instance_valid(snow_fx):
@@ -987,6 +1136,7 @@ func _ship_part(parent: Node3D, mesh: Mesh, color: Color, pos: Vector3, scale_fa
 	part.scale = scale_factor
 	part.rotation = rot
 	part.material_override = _ship_material(color, metallic, roughness, emission, energy)
+	part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if low_end else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	parent.add_child(part)
 	return part
 
@@ -1005,6 +1155,7 @@ func _ship_glass(parent: Node3D, mesh: Mesh, pos: Vector3, scale_factor: Vector3
 	material.emission = tint
 	material.emission_energy_multiplier = 0.55
 	part.material_override = material
+	part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(part)
 	return part
 
@@ -1177,28 +1328,145 @@ func _create_ship() -> void:
 	_ship_part(door_hinge, _ship_box(Vector3(1.72, 2.0, 0.12)), hull, Vector3(-0.86, 0, 0), Vector3.ONE, Vector3.ZERO, 0.6, 0.35)
 	_ship_glass(door_hinge, _ship_box(Vector3(0.62, 0.62, 0.05)), Vector3(-0.86, 0.28, 0.075), Vector3.ONE, Vector3.ZERO, Color("8ed8f2"))
 
-	# Interior vazio, com console de voo e iluminação.
-	var console := _ship_part(ship_root, _ship_box(Vector3(2.4, 0.85, 0.55)), steel, Vector3(0, 1.0, -3.95))
-	console.name = "Console"
-	_ship_part(ship_root, _ship_box(Vector3(2.28, 0.10, 0.78)), Color("596673"), Vector3(0, 1.43, -3.85), Vector3.ONE, Vector3(deg_to_rad(-16), 0, 0), 0.65, 0.35)
-	_ship_part(ship_root, _ship_box(Vector3(1.65, 0.44, 0.05)), Color("49d8c4"), Vector3(0, 1.86, -3.78), Vector3.ONE, Vector3(deg_to_rad(-8), 0, 0), 0.2, 0.2, Color("49d8c4"), 1.3)
-	for x in [-0.85, 0.85]:
-		_ship_part(ship_root, _ship_box(Vector3(0.05, 0.05, 0.05)), Color("ffb45c"), Vector3(x, 2.10, -3.73), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("ffb45c"), 1.4)
-	var cabin_light := OmniLight3D.new()
-	cabin_light.light_color = Color("cfe6ff")
-	cabin_light.light_energy = 1.1
-	cabin_light.omni_range = 7.0
-	cabin_light.position = Vector3(0, 2.65, -0.4)
-	ship_root.add_child(cabin_light)
-	for z in [-2.2, 1.4]:
-		_ship_part(ship_root, _ship_box(Vector3(1.5, 0.035, 0.22)), Color("bdefff"), Vector3(0, 3.08, z), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("bdefff"), 1.6)
+	# Airlock fechado: o interior real é um cenário separado, carregado ao entrar.
+	var airlock := _ship_part(ship_root, _ship_box(Vector3(3.9, 2.35, 0.14)), Color("1b232e"), Vector3(0, 1.72, 3.92), Vector3.ONE, Vector3.ZERO, 0.5, 0.5)
+	airlock.name = "Airlock"
+	_ship_part(ship_root, _ship_box(Vector3(2.9, 0.06, 0.06)), glow, Vector3(0, 2.55, 3.84), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, glow, 1.2)
+	_ship_part(ship_root, _ship_box(Vector3(1.1, 0.16, 0.08)), accent, Vector3(0, 1.25, 3.83), Vector3.ONE, Vector3.ZERO, 0.3, 0.4, accent, 0.5)
+	_ship_collider(Vector3(3.9, 2.35, 0.14), Vector3(0, 1.72, 3.92))
+	var airlock_label := Label3D.new()
+	airlock_label.text = "AIRLOCK • ENTRAR"
+	airlock_label.position = Vector3(0, 2.05, 3.80)
+	airlock_label.font_size = 34
+	airlock_label.outline_size = 8
+	airlock_label.modulate = Color("9feeff")
+	airlock_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	ship_root.add_child(airlock_label)
+
+func _build_interior_world() -> void:
+	# Cenário separado: a nave por dentro. Nada do planeta é montado aqui.
+	$Ground.visible = false
+	var ground_collision := $Ground.get_node_or_null("Collision")
+	if ground_collision:
+		ground_collision.disabled = true
+	player.global_position = INTERIOR_SPAWN
+	camera.global_position = INTERIOR_SPAWN + Vector3(0, 6.4, 8.4)
+	interior_root = Node3D.new()
+	interior_root.name = "ShipInterior"
+	add_child(interior_root)
+
+	var hull := Color("cdd7df")
+	var hull_dark := Color("6f8291")
+	var steel := Color("3c4856")
+	var accent := Color("e8a34b")
+	var glow := Color("7fe3ff")
+	var warm := Color("ffe2b8")
+	var floor_color := Color("2b3542")
+
+	# Piso e rodapés.
+	_ship_part(interior_root, _ship_box(Vector3(10.4, 0.20, 12.4)), floor_color, Vector3(0, 0, 0), Vector3.ONE, Vector3.ZERO, 0.75, 0.5)
+	_ship_collider(Vector3(10.4, 0.20, 12.4), Vector3(0, 0, 0), Vector3.ZERO, interior_root)
+	for x in [-5.1, 5.1]:
+		_ship_part(interior_root, _ship_box(Vector3(0.12, 0.22, 12.4)), hull_dark, Vector3(x, 0.16, 0), Vector3.ONE, Vector3.ZERO, 0.6, 0.4)
+	_ship_part(interior_root, _ship_box(Vector3(3.8, 0.025, 2.6)), Color("24515c"), Vector3(0, 0.115, 0.7), Vector3.ONE, Vector3.ZERO, 0.2, 0.85)
+	_ship_part(interior_root, _ship_box(Vector3(3.3, 0.02, 2.1)), Color("2f6f78"), Vector3(0, 0.125, 0.7), Vector3.ONE, Vector3.ZERO, 0.2, 0.85)
+
+	# Paredes laterais, traseira e frente com escotilha.
+	var wall_height := 3.9
+	var wall_y := 1.95
+	_ship_part(interior_root, _ship_box(Vector3(0.30, wall_height, 12.4)), hull, Vector3(-5.05, wall_y, 0), Vector3.ONE, Vector3.ZERO, 0.65, 0.34)
+	_ship_part(interior_root, _ship_box(Vector3(0.30, wall_height, 12.4)), hull, Vector3(5.05, wall_y, 0), Vector3.ONE, Vector3.ZERO, 0.65, 0.34)
+	_ship_part(interior_root, _ship_box(Vector3(10.4, wall_height, 0.30)), hull, Vector3(0, wall_y, -6.05), Vector3.ONE, Vector3.ZERO, 0.65, 0.34)
+	for x in [-3.15, 3.15]:
+		_ship_part(interior_root, _ship_box(Vector3(4.10, wall_height, 0.30)), hull, Vector3(x, wall_y, 6.05), Vector3.ONE, Vector3.ZERO, 0.65, 0.34)
+	_ship_part(interior_root, _ship_box(Vector3(2.30, 1.30, 0.30)), hull, Vector3(0, 3.25, 6.05), Vector3.ONE, Vector3.ZERO, 0.65, 0.34)
+	_ship_collider(Vector3(0.30, wall_height, 12.4), Vector3(-5.05, wall_y, 0), Vector3.ZERO, interior_root)
+	_ship_collider(Vector3(0.30, wall_height, 12.4), Vector3(5.05, wall_y, 0), Vector3.ZERO, interior_root)
+	_ship_collider(Vector3(10.4, wall_height, 0.30), Vector3(0, wall_y, -6.05), Vector3.ZERO, interior_root)
+	_ship_collider(Vector3(4.10, wall_height, 0.30), Vector3(-3.15, wall_y, 6.05), Vector3.ZERO, interior_root)
+	_ship_collider(Vector3(4.10, wall_height, 0.30), Vector3(3.15, wall_y, 6.05), Vector3.ZERO, interior_root)
+	# A escotilha é interativa, mas mantém o astronauta dentro da sala.
+	_ship_collider(Vector3(2.30, wall_height, 0.30), Vector3(0, wall_y, 6.05), Vector3.ZERO, interior_root)
+
+	# Vigas e faixas de luz no teto (a sala é um corte, sem teto sólido).
+	for z in [-4.6, -2.0, 0.6, 3.2, 5.4]:
+		_ship_part(interior_root, _ship_box(Vector3(9.4, 0.18, 0.20)), hull_dark, Vector3(0, 3.82, z), Vector3.ONE, Vector3.ZERO, 0.6, 0.4)
+	for z in [-3.2, 0.0, 3.0]:
+		_ship_part(interior_root, _ship_box(Vector3(3.0, 0.035, 0.15)), warm, Vector3(0, 3.68, z), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, warm, 1.3)
+	for x in [-4.6, 4.6]:
+		_ship_part(interior_root, _ship_box(Vector3(0.10, 0.10, 11.6)), accent, Vector3(x, 3.42, 0), Vector3.ONE, Vector3.ZERO, 0.35, 0.4, accent, 0.25)
+
+	# Janelas laterais com o vazio estrelado do espaço.
+	for side in [-1.0, 1.0]:
+		_ship_part(interior_root, _ship_box(Vector3(0.12, 1.45, 2.35)), steel, Vector3(side * 4.92, 2.05, -1.1), Vector3.ONE, Vector3.ZERO, 0.6, 0.35)
+		_ship_glass(interior_root, _ship_box(Vector3(0.05, 1.00, 1.85)), Vector3(side * 4.86, 2.05, -1.1), Vector3.ONE, Vector3.ZERO, Color("12283f"))
+		_ship_glass(interior_root, _ship_box(Vector3(0.045, 0.10, 1.85)), Vector3(side * 4.84, 2.05, -1.1), Vector3.ONE, Vector3.ZERO, Color("6fdcff"))
+
+	# Armários, caixas e tubulações nas laterais.
+	for z in [-4.9, -3.2]:
+		_ship_part(interior_root, _ship_box(Vector3(1.20, 2.10, 1.05)), Color("54626f"), Vector3(-4.25, 1.15, z), Vector3.ONE, Vector3.ZERO, 0.55, 0.45)
+		_ship_part(interior_root, _ship_box(Vector3(0.90, 0.08, 0.06)), accent, Vector3(-4.25, 1.55, z + 0.54), Vector3.ONE, Vector3.ZERO, 0.3, 0.4)
+	for i in range(3):
+		_ship_part(interior_root, _ship_box(Vector3(0.72, 0.62, 0.72)), Color("7a6046").lightened(i * 0.06), Vector3(4.10 - i * 0.12, 0.42 + i * 0.0, 4.35 - i * 0.85), Vector3.ONE, Vector3(0, i * 0.25, 0), 0.5, 0.65)
+	for side in [-1.0, 1.0]:
+		_ship_part(interior_root, _ship_cylinder(0.10, 0.10, 7.6, 10), steel, Vector3(side * 4.62, 3.30, 0), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.7, 0.35)
+		_ship_part(interior_root, _ship_cylinder(0.06, 0.06, 7.6, 8), accent, Vector3(side * 4.62, 3.10, 0), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.4, 0.4, accent, 0.3)
+
+	# Console de voo no fundo da sala.
+	_ship_part(interior_root, _ship_box(Vector3(3.30, 0.90, 1.10)), steel, Vector3(0, 0.55, -4.95), Vector3.ONE, Vector3.ZERO, 0.7, 0.35)
+	_ship_part(interior_root, _ship_box(Vector3(3.50, 0.12, 1.30)), Color("596673"), Vector3(0, 1.04, -4.85), Vector3.ONE, Vector3(deg_to_rad(-7), 0, 0), 0.65, 0.35)
+	_ship_part(interior_root, _ship_box(Vector3(2.70, 1.00, 0.08)), Color("16323d"), Vector3(0, 1.78, -5.35), Vector3.ONE, Vector3(deg_to_rad(-10), 0, 0), 0.3, 0.25)
+	_ship_part(interior_root, _ship_box(Vector3(2.48, 0.80, 0.05)), Color("49d8c4"), Vector3(0, 1.79, -5.30), Vector3.ONE, Vector3(deg_to_rad(-10), 0, 0), 0.2, 0.2, Color("49d8c4"), 1.5)
+	_ship_part(interior_root, _ship_box(Vector3(1.10, 0.05, 0.05)), Color("bdf7ee"), Vector3(0, 1.60, -5.26), Vector3.ONE, Vector3.ZERO, 0.2, 0.2, Color("bdf7ee"), 1.8)
+	for x in [-1.05, 1.05]:
+		_ship_part(interior_root, _ship_box(Vector3(0.22, 0.14, 0.16)), Color("ffb45c"), Vector3(x, 1.16, -4.55), Vector3.ONE, Vector3.ZERO, 0.2, 0.3, Color("ffb45c"), 1.4)
+	_ship_collider(Vector3(3.40, 1.30, 1.20), Vector3(0, 0.65, -4.95), Vector3.ZERO, interior_root)
+	console_position = INTERIOR_CONSOLE
+
+	# Escotilha de saída.
+	_ship_part(interior_root, _ship_cylinder(1.12, 1.12, 0.22, 32), steel, Vector3(0, 1.15, 5.92), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.7, 0.35)
+	var hatch_ring := TorusMesh.new()
+	hatch_ring.inner_radius = 0.86
+	hatch_ring.outer_radius = 1.04
+	hatch_ring.rings = 32
+	hatch_ring.ring_segments = 8
+	_ship_part(interior_root, hatch_ring, glow, Vector3(0, 1.15, 6.04), Vector3.ONE, Vector3(deg_to_rad(90), 0, 0), 0.2, 0.25, glow, 1.5)
+	_ship_part(interior_root, _ship_box(Vector3(0.62, 0.16, 0.10)), accent, Vector3(0, 1.15, 6.08), Vector3.ONE, Vector3.ZERO, 0.35, 0.4, accent, 0.7)
+	var hatch_label := Label3D.new()
+	hatch_label.text = "ESCOTILHA"
+	hatch_label.position = Vector3(0, 2.62, 5.95)
+	hatch_label.font_size = 34
+	hatch_label.outline_size = 8
+	hatch_label.modulate = Color("9feeff")
+	hatch_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	interior_root.add_child(hatch_label)
+	exit_hatch_position = Vector3(0, 1.05, 5.05)
+
+	# Iluminação interna, registrada para escurecer com a noite.
+	_add_interior_light(Vector3(0, 3.15, 0.6), Color("ffe6c7"), 1.15, 9.0)
+	_add_interior_light(Vector3(0, 2.35, -4.6), Color("54e6d4"), 0.95, 4.8)
+	_add_interior_light(Vector3(-3.2, 1.7, -2.4), Color("62e6d4"), 0.55, 3.4)
+	_add_interior_light(Vector3(3.1, 1.9, 1.5), Color("ffd9a6"), 0.55, 3.4)
+	_add_interior_light(Vector3(0, 2.1, 5.1), Color("6fdcff"), 0.75, 4.2)
+
+	_create_crew_quarters()
+
+func _add_interior_light(pos: Vector3, color: Color, energy: float, light_range: float) -> void:
+	var light := OmniLight3D.new()
+	light.light_color = color
+	light.light_energy = energy
+	light.omni_range = light_range
+	light.position = pos
+	light.set_meta("base_energy", energy)
+	interior_lights.append(light)
+	interior_root.add_child(light)
 
 func _create_crew_quarters() -> void:
 	# ARIA: robô que envia e acompanha as missões dentro da nave.
 	robot_root = Node3D.new()
 	robot_root.name = "MissionRobot"
-	robot_root.position = Vector3(-1.5, 0.585, -1.9)
-	ship_root.add_child(robot_root)
+	robot_root.position = Vector3(-3.2, 0.10, -2.4)
+	interior_root.add_child(robot_root)
 	var dark := Color("2b3440")
 	var shell := Color("cdd7df")
 	var cyan := Color("5ce0d0")
@@ -1222,18 +1490,20 @@ func _create_crew_quarters() -> void:
 	robot_root.add_child(label)
 	var robot_light := OmniLight3D.new()
 	robot_light.light_color = Color("62e6d4")
-	robot_light.light_energy = 0.65
-	robot_light.omni_range = 3.2
+	robot_light.light_energy = 0.55
+	robot_light.omni_range = 3.0
 	robot_light.position = Vector3(0, 1.2, 0)
+	robot_light.set_meta("base_energy", 0.55)
 	robot_root.add_child(robot_light)
-	_ship_collider(Vector3(0.85, 1.35, 0.65), Vector3(-1.5, 1.0, -1.9))
-	robot_position = ship_position + Vector3(-1.5, 1.0, -1.9)
+	interior_lights.append(robot_light)
+	_ship_collider(Vector3(0.85, 1.35, 0.65), Vector3(-3.2, 0.8, -2.4), Vector3.ZERO, interior_root)
+	robot_position = Vector3(-3.2, 1.0, -2.4)
 
 	# Beliche de duas camas, encostado na parede direita.
 	bed_root = Node3D.new()
 	bed_root.name = "BunkBed"
-	bed_root.position = Vector3(1.47, 0.585, 1.9)
-	ship_root.add_child(bed_root)
+	bed_root.position = Vector3(3.15, 0.10, 1.5)
+	interior_root.add_child(bed_root)
 	var frame := Color("7d8a96")
 	var mattress := Color("5f8fc4")
 	var pillow := Color("e8eef5")
@@ -1248,22 +1518,26 @@ func _create_crew_quarters() -> void:
 		_ship_part(bed_root, _ship_box(Vector3(1.00, 0.05, 1.10)), blanket, Vector3(0, y + 0.22, 0.48), Vector3.ONE, Vector3.ZERO, 0.2, 0.75)
 	for i in range(4):
 		_ship_part(bed_root, _ship_box(Vector3(0.06, 0.05, 1.15)), frame, Vector3(-0.62, 0.28 + i * 0.42, 0.2))
-	_ship_collider(Vector3(1.25, 1.9, 2.5), Vector3(1.47, 0.95, 1.9))
-	bed_position = ship_position + Vector3(1.0, 1.0, 1.9)
+	_ship_collider(Vector3(1.25, 1.9, 2.5), Vector3(3.15, 0.95, 1.5), Vector3.ZERO, interior_root)
+	bed_position = Vector3(3.15, 1.0, 1.5)
 
 func _near_robot() -> bool:
-	return _player_inside_ship() and player.global_position.distance_to(robot_position) <= 1.8
+	return _is_interior() and player.global_position.distance_to(robot_position) <= 1.8
 
 func _near_bed() -> bool:
-	return _player_inside_ship() and player.global_position.distance_to(bed_position) <= 1.8
+	return _is_interior() and player.global_position.distance_to(bed_position) <= 1.8
+
+func _near_exit_hatch() -> bool:
+	return _is_interior() and player.global_position.distance_to(exit_hatch_position) <= 2.2
 
 func _ship_station_nearby() -> String:
-	if not _player_inside_ship():
+	if not _is_interior():
 		return ""
 	var stations := [
 		["robot", robot_position, 1.8],
 		["bed", bed_position, 1.8],
-		["console", ship_position + Vector3(0, 1.2, -3.85), 2.8],
+		["console", console_position, 2.4],
+		["hatch", exit_hatch_position, 2.2],
 	]
 	var best := ""
 	var best_distance := INF
@@ -1467,13 +1741,18 @@ func _near_lake() -> bool:
 	return Vector2(offset.x, offset.z).length() <= 6.5
 
 func _near_ship_door() -> bool:
+	if _is_interior():
+		return false
 	return player.global_position.distance_to(ship_door_position) <= 4.2
 
-func _near_ship_console() -> bool:
-	if not _player_inside_ship():
+func _near_ship_entrance() -> bool:
+	if _is_interior():
 		return false
-	var console_position := ship_position + Vector3(0, 1.2, -3.85)
-	return player.global_position.distance_to(console_position) <= 2.8
+	var local := player.global_position - ship_position
+	return absf(local.x) < 1.2 and local.z > 3.1 and local.z < 4.95 and local.y > 0.82
+
+func _near_ship_console() -> bool:
+	return _is_interior() and player.global_position.distance_to(console_position) <= 2.4
 
 func _refresh_ending_texts() -> void:
 	ending_title.text = GameManager.t("ending_title")
@@ -1483,6 +1762,8 @@ func _refresh_ending_texts() -> void:
 
 func _start_ending() -> void:
 	if ending_started or not GameManager.missions_complete:
+		return
+	if not _is_interior() or not _near_ship_console():
 		return
 	ending_started = true
 	paused = true
@@ -1521,29 +1802,64 @@ func _close_ending() -> void:
 	touch_controls.visible = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
 
 func _ending_to_menu() -> void:
+	GameManager.in_interior = false
+	GameManager.interior_snapshot.clear()
+	GameManager.pending_snapshot.clear()
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
 
 func _player_inside_ship() -> bool:
-	if not is_instance_valid(ship_root) or not player:
-		return false
-	var local := player.global_position - ship_position
-	return absf(local.x) < 2.15 and local.z > -4.2 and local.z < 4.55 and local.y > 0.45 and local.y < 3.2
+	# A nave é um cenário separado: só existe "dentro" no modo interior.
+	return _is_interior()
 
-func _update_ship_interior(delta: float) -> void:
-	if not is_instance_valid(ship_roof):
+func _update_ship_interior(_delta: float) -> void:
+	# O casco exterior permanece fechado; o interior é carregado à parte.
+	ship_inside = false
+
+func _check_ship_entry() -> void:
+	if transitioning or enter_guard > 0.0 or paused or game_over or _is_interior():
 		return
-	ship_inside = _player_inside_ship()
-	var target := 0.82 if ship_inside else 0.0
-	ship_roof.transparency = move_toward(ship_roof.transparency, target, delta * 2.8)
-	if ship_inside and not ship_entered:
-		ship_entered = true
-		Sfx.play("click")
-		_show_popup("🚀 Interior da nave • console desligado")
-	elif not ship_inside and ship_entered:
-		var local := player.global_position - ship_position
-		if Vector2(local.x, local.z).length() > 6.0:
-			ship_entered = false
+	if _near_ship_entrance():
+		_enter_ship()
+
+func _enter_ship(reload: bool = true) -> void:
+	if transitioning or _is_interior():
+		return
+	var snap := _snapshot()
+	snap["in_interior"] = true
+	snap["interior_return"] = [player.global_position.x, player.global_position.y, player.global_position.z]
+	snap["exterior_cooldowns"] = snap.get("resource_cooldowns", [])
+	snap["position"] = [INTERIOR_SPAWN.x, INTERIOR_SPAWN.y, INTERIOR_SPAWN.z]
+	GameManager.interior_snapshot = snap.duplicate(true)
+	GameManager.in_interior = true
+	GameManager.pending_snapshot = snap
+	if reload:
+		transitioning = true
+		_reload_gameplay()
+
+func _exit_ship(reload: bool = true) -> void:
+	if not _is_interior() or transitioning:
+		return
+	var snap := _snapshot()
+	snap["in_interior"] = false
+	var outside := ship_position + Vector3(0, 1.05, 6.0)
+	snap["position"] = [outside.x, outside.y, outside.z]
+	snap["interior_return"] = [outside.x, outside.y, outside.z]
+	snap["resource_cooldowns"] = exterior_cooldowns if not exterior_cooldowns.is_empty() else snap.get("exterior_cooldowns", [])
+	snap.erase("exterior_cooldowns")
+	GameManager.in_interior = false
+	GameManager.interior_snapshot.clear()
+	GameManager.pending_snapshot = snap
+	if reload:
+		transitioning = true
+		_reload_gameplay()
+
+func _reload_gameplay() -> void:
+	get_tree().paused = false
+	if get_tree().current_scene != null:
+		get_tree().change_scene_to_file("res://scenes/Gameplay.tscn")
+	else:
+		transitioning = false
 
 func _should_use_lake(mission: Dictionary, item: Node3D) -> bool:
 	return _near_lake() and (item == null or mission.get("target", "") == "lake" or (thirst < 100.0 and mission.get("action", "") != "interact"))
@@ -1551,8 +1867,9 @@ func _should_use_lake(mission: Dictionary, item: Node3D) -> bool:
 func _update_hint() -> void:
 	var item: Node3D = _nearest_item()
 	var mission: Dictionary = GameManager.get_current_mission()
+	var snake: Node3D = _nearest_snake()
 	var hint := "Explore os biomas • Encontre recursos e o lago turquesa"
-	if _player_inside_ship():
+	if _is_interior():
 		match _ship_station_nearby():
 			"robot":
 				hint = "🤖 E / AÇÃO • Falar com ARIA (missões)"
@@ -1560,8 +1877,12 @@ func _update_hint() -> void:
 				hint = "🛏 E / AÇÃO • Dormir até o amanhecer" if _is_night() else "🛏 O beliche serve para dormir à noite"
 			"console":
 				hint = GameManager.t("ending_console_hint") if GameManager.missions_complete else "🚀 Console sem energia • conclua as missões"
+			"hatch":
+				hint = "🚪 E / AÇÃO • Sair da nave para o planeta"
 			_:
-				hint = GameManager.t("ending_console_go") if GameManager.missions_complete else "🚀 Interior da nave • console desligado • fale com ARIA"
+				hint = GameManager.t("ending_console_go") if GameManager.missions_complete else "🚀 Interior da nave • fale com ARIA para ver as missões"
+	elif snake != null and mission.get("action", "") != "interact":
+		hint = "🐍 E / AÇÃO • Atacar cobra (%d/%d) • cuidado, ela dá o bote" % [int(ceil(snake.health)), int(snake.max_health)]
 	elif _should_use_lake(mission, item):
 		hint = "E / AÇÃO • Beber água / analisar o lago"
 	elif item:
@@ -1576,24 +1897,13 @@ func _update_hint() -> void:
 		hint = GameManager.t("ending_console_door") if GameManager.missions_complete else "🚀 Suba a rampa para entrar na nave"
 	$CanvasLayer/HUD/HintLabel.text = hint
 
-var touch_left := false
-var touch_right := false
-var touch_up := false
-var touch_down := false
-
 func _setup_touch() -> void:
-	# Raw touch events track each finger independently; GUI mouse emulation
-	# remains available for menus, but cannot trigger gameplay buttons twice.
-	for button in [left_button, right_button, up_button, down_button, jump_button, interact_button]:
-		button.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	left_button.button_down.connect(func(): touch_left = true; _refresh_touch_dir())
-	left_button.button_up.connect(func(): touch_left = false; _refresh_touch_dir())
-	right_button.button_down.connect(func(): touch_right = true; _refresh_touch_dir())
-	right_button.button_up.connect(func(): touch_right = false; _refresh_touch_dir())
-	up_button.button_down.connect(func(): touch_up = true; _refresh_touch_dir())
-	up_button.button_up.connect(func(): touch_up = false; _refresh_touch_dir())
-	down_button.button_down.connect(func(): touch_down = true; _refresh_touch_dir())
-	down_button.button_up.connect(func(): touch_down = false; _refresh_touch_dir())
+	# O joystick analógico e os botões usam toques crus, cada dedo é
+	# rastreado separadamente. A GUI continua disponível para os menus.
+	for control in [joystick, joystick_base, joystick_knob, jump_button, interact_button]:
+		if is_instance_valid(control):
+			control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_move_knob(Vector2.ZERO)
 
 func _input(event: InputEvent) -> void:
 	if paused or game_over or not touch_controls.visible:
@@ -1602,55 +1912,106 @@ func _input(event: InputEvent) -> void:
 		if event.pressed and not event.canceled:
 			var action := _touch_action_at(event.position)
 			if not action.is_empty():
-				_set_finger_action(event.index, action)
+				_set_finger_action(event.index, action, event.position)
 		else:
-			_set_finger_action(event.index, "")
+			_set_finger_action(event.index, "", event.position)
 			touch_fingers.erase(event.index)
 		if touch_controls.get_global_rect().has_point(event.position):
-			# Leave non-gameplay touches available to the HUD pause button.
+			# Deixa o botão de pausa do HUD receber toques fora dos controles.
 			if _touch_action_at(event.position) != "":
 				get_viewport().set_input_as_handled()
 	elif event is InputEventScreenDrag:
-		if touch_fingers.has(event.index):
-			_set_finger_action(event.index, _touch_action_at(event.position))
+		if event.index == joystick_index:
+			# O dedo do joystick continua controlando a direção mesmo se
+			# escorregar para fora da base (joystick analógico clássico).
+			_set_finger_action(event.index, "move", event.position)
+			get_viewport().set_input_as_handled()
+		elif touch_fingers.has(event.index):
+			_set_finger_action(event.index, _touch_action_at(event.position), event.position)
 			get_viewport().set_input_as_handled()
 
 func _touch_action_at(point: Vector2) -> String:
-	var controls := {"left": left_button, "right": right_button, "up": up_button, "down": down_button, "jump": jump_button, "interact": interact_button}
+	if is_instance_valid(joystick) and joystick.get_global_rect().has_point(point):
+		return "move"
+	var controls := {"jump": jump_button, "interact": interact_button}
 	for action in controls:
 		if controls[action].get_global_rect().has_point(point):
 			return action
 	return ""
 
-func _set_finger_action(index: int, action: String) -> void:
+func _set_finger_action(index: int, action: String, point: Vector2 = Vector2.ZERO) -> void:
 	var previous: String = touch_fingers.get(index, "")
-	touch_fingers[index] = action
-	var held := touch_fingers.values()
-	touch_left = held.has("left")
-	touch_right = held.has("right")
-	touch_up = held.has("up")
-	touch_down = held.has("down")
+	if action == "move":
+		if joystick_index == -1:
+			joystick_index = index
+		elif joystick_index != index:
+			# Um segundo dedo no joystick é ignorado até o primeiro soltar.
+			return
+		touch_fingers[index] = "move"
+		_update_joystick(point)
+	else:
+		if joystick_index == index:
+			joystick_index = -1
+			joystick_vector = Vector2.ZERO
+			touch_dir = Vector2.ZERO
+			_move_knob(Vector2.ZERO)
+		if action.is_empty():
+			touch_fingers.erase(index)
+		else:
+			touch_fingers[index] = action
 	_refresh_touch_dir()
-	var controls := {"left": left_button, "right": right_button, "up": up_button, "down": down_button, "jump": jump_button, "interact": interact_button}
-	for name in controls:
-		controls[name].set_pressed_no_signal(held.has(name))
+	var held := touch_fingers.values()
+	jump_button.set_pressed_no_signal(held.has("jump"))
+	interact_button.set_pressed_no_signal(held.has("interact"))
 	if action != previous:
 		if action == "jump":
 			_on_jump_pressed()
 		elif action == "interact":
 			_on_interact_pressed()
 
+func _update_joystick(point: Vector2) -> void:
+	if not is_instance_valid(joystick_base):
+		return
+	var center := joystick_base.get_global_rect().get_center()
+	var radius := _joystick_radius()
+	var offset := point - center
+	var strength := clampf(offset.length() / radius, 0.0, 1.0)
+	if strength <= JOYSTICK_DEADZONE:
+		joystick_vector = Vector2.ZERO
+	else:
+		var scaled := (strength - JOYSTICK_DEADZONE) / (1.0 - JOYSTICK_DEADZONE)
+		joystick_vector = offset.normalized() * clampf(scaled, 0.0, 1.0)
+	_move_knob(joystick_vector * radius)
+	_refresh_touch_dir()
+
+func _joystick_radius() -> float:
+	var base_size: Vector2 = joystick_base.size
+	var knob_size: Vector2 = joystick_knob.size
+	if base_size.x <= 0.0 or knob_size.x <= 0.0:
+		return 65.0
+	return maxf(8.0, minf(base_size.x, base_size.y) * 0.5 - knob_size.x * 0.5)
+
+func _move_knob(offset: Vector2) -> void:
+	if not is_instance_valid(joystick_base) or not is_instance_valid(joystick_knob):
+		return
+	var center := (joystick_base.size - joystick_knob.size) * 0.5
+	joystick_knob.position = center + offset
+
 func _clear_touch() -> void:
 	touch_fingers.clear()
-	_set_finger_action(-1, "")
-	touch_fingers.clear()
+	joystick_index = -1
+	joystick_vector = Vector2.ZERO
+	touch_dir = Vector2.ZERO
+	_move_knob(Vector2.ZERO)
+	if is_instance_valid(jump_button):
+		jump_button.set_pressed_no_signal(false)
+	if is_instance_valid(interact_button):
+		interact_button.set_pressed_no_signal(false)
 	if is_instance_valid(player):
 		player.external_move = Vector2.ZERO
 
 func _refresh_touch_dir() -> void:
-	var x := (1.0 if touch_right else 0.0) - (1.0 if touch_left else 0.0)
-	var y := (1.0 if touch_down else 0.0) - (1.0 if touch_up else 0.0)
-	touch_dir = Vector2(x, y)
+	touch_dir = joystick_vector
 
 func _on_jump_pressed() -> void:
 	if player and player.is_on_floor():
@@ -1670,7 +2031,12 @@ func _on_interact_pressed() -> void:
 			"console":
 				if GameManager.missions_complete:
 					_start_ending()
-					return
+				else:
+					_show_popup("🚀 Console sem energia • conclua as missões com ARIA")
+				return
+			"hatch":
+				_exit_ship()
+				return
 		if GameManager.missions_complete:
 			_show_popup(GameManager.t("ending_console_go"))
 			return
@@ -1680,6 +2046,10 @@ func _on_interact_pressed() -> void:
 		_gain_xp(25 if done else 5)
 		_update_mission()
 		_show_popup("Relatório entregue!" if done else "Relatório em andamento")
+		return
+	var snake: Node3D = _nearest_snake()
+	if snake != null and m.get("action", "") != "interact":
+		_attack_snake(snake)
 		return
 	var item: Node3D = _nearest_item()
 	if item and item.tipo_item == "animal" and item.available and m.get("action", "") != "interact" and not _should_use_lake(m, item):
@@ -1721,6 +2091,8 @@ func _quit_to_menu() -> void:
 	if not game_over and _save_progress() != OK:
 		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Falha ao salvar. Tente novamente."
 		return
+	GameManager.in_interior = false
+	GameManager.interior_snapshot.clear()
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
 
@@ -1734,6 +2106,8 @@ func _trigger_game_over() -> void:
 
 func _restart() -> void:
 	GameManager.pending_snapshot.clear()
+	GameManager.in_interior = false
+	GameManager.interior_snapshot.clear()
 	GameManager.build_mission_list()
 	get_tree().paused = false
 	get_tree().reload_current_scene()
@@ -1749,10 +2123,13 @@ func _check_achievements() -> void:
 
 # --- Auto-save ---
 func _snapshot() -> Dictionary:
-	var cooldowns: Array[float] = []
-	for item in items_node.get_children():
-		cooldowns.append(item.respawn_timer.time_left)
-	return {
+	var cooldowns: Array = []
+	if _is_interior():
+		cooldowns = exterior_cooldowns.duplicate()
+	else:
+		for item in items_node.get_children():
+			cooldowns.append(item.respawn_timer.time_left)
+	var snap := {
 		"version": GameManager.SAVE_VERSION,
 		"position": [player.global_position.x, player.global_position.y, player.global_position.z],
 		"health": health,
@@ -1760,6 +2137,9 @@ func _snapshot() -> Dictionary:
 		"inventory": inventory.duplicate(true), "time_of_day": time_of_day,
 		"day": day_count, "weather": weather, "weather_timer": weather_timer,
 		"world_seed": world_seed, "resource_cooldowns": cooldowns,
+		"in_interior": _is_interior(),
+		"interior_return": [exterior_return.x, exterior_return.y, exterior_return.z],
+		"exterior_cooldowns": cooldowns.duplicate() if _is_interior() else cooldowns.duplicate(),
 		"singleplayer": GameManager.singleplayer, "role": GameManager.role,
 		"player": {
 			"name": GameManager.player_name,
@@ -1778,6 +2158,9 @@ func _snapshot() -> Dictionary:
 		"mission_index": GameManager.current_mission_index,
 		"mission_progress": GameManager.current_mission_progress,
 	}
+	if _is_interior():
+		snap["exterior_day"] = exterior_day
+	return snap
 
 func _restore_snapshot(snapshot: Dictionary) -> void:
 	if snapshot.is_empty():
@@ -1788,7 +2171,8 @@ func _restore_snapshot(snapshot: Dictionary) -> void:
 	elif saved_position is Vector3:
 		player.global_position = saved_position
 	player.velocity = Vector3.ZERO
-	camera.global_position = player.global_position + Vector3(0, 12, 14)
+	var cam_offset := Vector3(0, 6.4, 8.4) if _is_interior() else Vector3(0, 12, 14)
+	camera.global_position = player.global_position + cam_offset
 	camera.look_at(player.global_position, Vector3.UP)
 	health = clampf(snapshot.get("health", 100.0), 1.0, 100.0)
 	hunger = clampf(snapshot.get("hunger", 100.0), 0.0, 100.0)
@@ -1822,10 +2206,13 @@ func _save_progress() -> Error:
 	if game_over or health <= 0:
 		return OK # Preserve the last living checkpoint.
 	if GameManager.active_slot < 0:
+		# Criar o slot no meio da partida não pode derrubar o modo interior.
+		var was_interior: bool = GameManager.in_interior
 		var index: int = GameManager.first_empty_slot()
 		if index < 0:
 			index = maxi(0, GameManager.saved_games.size() - 1)
 		var error: Error = GameManager.begin_new_game(index, true)
+		GameManager.in_interior = was_interior
 		if error != OK:
 			return error
 	var error := GameManager.store_snapshot(_snapshot())
@@ -1854,6 +2241,27 @@ func _notification(what: int) -> void:
 			get_tree().quit()
 		else:
 			_show_popup("Falha ao salvar. Salve no menu de pausa antes de sair.")
+
+func _n(base: int) -> int:
+	# Densidade de cenário: no Android mantém a composição, mas com menos nós.
+	return maxi(2, int(round(float(base) * (0.58 if low_end else 1.0))))
+
+func _apply_low_end_settings() -> void:
+	# Ajustes de desempenho aplicados apenas em dispositivos móveis.
+	Engine.max_fps = 60
+	var viewport := get_viewport()
+	if viewport:
+		viewport.scaling_3d_scale = 0.78
+	var env: Environment = $WorldEnvironment.environment
+	env.glow_enabled = false
+	env.ssao_enabled = false
+	env.ssil_enabled = false
+	env.sdfgi_enabled = false
+	env.volumetric_fog_enabled = false
+	env.adjustment_enabled = false
+	sun.shadow_enabled = false
+	if is_instance_valid(moon_light):
+		moon_light.shadow_enabled = false
 
 func _setup_visuals() -> void:
 	# Duplicate the resource so the menu/cutscene keep their own environment.
@@ -1894,6 +2302,8 @@ func _setup_visuals() -> void:
 	mission_label.add_theme_color_override("font_color", Color("f2dc99"))
 	inventory_label.add_theme_stylebox_override("normal", panel)
 	$CanvasLayer/HUD/HintLabel.add_theme_stylebox_override("normal", panel)
+	if low_end:
+		_apply_low_end_settings()
 	_update_day_night()
 
 
@@ -1906,6 +2316,7 @@ func _scenery(shape: Mesh, color: Color, pos: Vector3, size: Vector3 = Vector3.O
 	material.albedo_color = color
 	material.roughness = 0.85
 	mesh.material_override = material
+	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if low_end else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	add_child(mesh)
 	return mesh
 
@@ -1935,7 +2346,7 @@ func _create_landmarks() -> void:
 		ice.height = 2.0 + i * 0.65
 		ice.radial_segments = 5
 		_scenery(ice, Color("8abed5"), Vector3(30 + i * 1.2, ice.height / 2.0, 12))
-	for i in range(36):
+	for i in range(_n(36)):
 		var flower := SphereMesh.new()
 		flower.radius = 0.14
 		flower.height = 0.25

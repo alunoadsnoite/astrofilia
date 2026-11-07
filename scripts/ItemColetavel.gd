@@ -243,6 +243,7 @@ func _part(shape: Mesh, color: Color, offset: Vector3, size: Vector3 = Vector3.O
 		material.emission = color
 		material.emission_energy_multiplier = 0.35
 	part.material_override = material
+	part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	visual.add_child(part)
 	return part
 

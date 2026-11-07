@@ -9,6 +9,11 @@ const SAVE_VERSION := 2
 
 var active_slot: int = -1
 var pending_snapshot: Dictionary = {}
+# A nave é um cenário separado. Quando in_interior é verdadeiro, a cena
+# Gameplay.tscn monta apenas o interior da nave em vez do planeta.
+var in_interior: bool = false
+var interior_snapshot: Dictionary = {}
+var pending_ending: bool = false
 
 var player_name: String = "Astronauta"
 var language: String = "pt"
@@ -394,6 +399,9 @@ func begin_new_game(slot: int, create_new: bool = true) -> Error:
 		if slot < 0 or slot >= saved_games.size():
 			return Error.ERR_INVALID_PARAMETER
 	GameManager.active_slot = target
+	in_interior = false
+	interior_snapshot.clear()
+	pending_ending = false
 	var slot_data := {
 		"name": player_name,
 		"created": Time.get_ticks_msec(),
@@ -480,6 +488,9 @@ func prepare_continue(slot: int) -> bool:
 		role = snapshot["role"]
 	active_slot = slot
 	pending_snapshot = snapshot.duplicate(true)
+	in_interior = bool(pending_snapshot.get("in_interior", false))
+	interior_snapshot = pending_snapshot.duplicate(true)
+	pending_ending = bool(pending_snapshot.get("pending_ending", false))
 	build_mission_list()
 	var saved_index: int = int(snapshot.get("mission_index", 0))
 	current_mission_progress = int(snapshot.get("mission_progress", 0))

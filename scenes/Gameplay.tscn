@@ -427,53 +427,36 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="DPad" type="Control" parent="CanvasLayer/TouchControls"]
+[node name="Joystick" type="Control" parent="CanvasLayer/TouchControls"]
 layout_mode = 1
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
-offset_left = 20.0
-offset_top = -220.0
-offset_right = 200.0
-offset_bottom = -40.0
+offset_left = 24.0
+offset_top = -248.0
+offset_right = 224.0
+offset_bottom = -48.0
 grow_vertical = 0
 mouse_filter = 2
 
-[node name="LeftButton" type="Button" parent="CanvasLayer/TouchControls/DPad"]
-layout_mode = 0
-offset_left = 0.0
-offset_top = 60.0
-offset_right = 60.0
-offset_bottom = 120.0
-text = "←"
-theme_override_font_sizes/font_size = 28
+[node name="Base" type="Panel" parent="CanvasLayer/TouchControls/Joystick"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_joystick_base")
 
-[node name="RightButton" type="Button" parent="CanvasLayer/TouchControls/DPad"]
+[node name="Knob" type="Panel" parent="CanvasLayer/TouchControls/Joystick/Base"]
 layout_mode = 0
-offset_left = 120.0
-offset_top = 60.0
-offset_right = 180.0
-offset_bottom = 120.0
-text = "→"
-theme_override_font_sizes/font_size = 28
-
-[node name="UpButton" type="Button" parent="CanvasLayer/TouchControls/DPad"]
-layout_mode = 0
-offset_left = 60.0
-offset_top = 0.0
-offset_right = 120.0
-offset_bottom = 60.0
-text = "↑"
-theme_override_font_sizes/font_size = 28
-
-[node name="DownButton" type="Button" parent="CanvasLayer/TouchControls/DPad"]
-layout_mode = 0
-offset_left = 60.0
-offset_top = 120.0
-offset_right = 120.0
-offset_bottom = 180.0
-text = "↓"
-theme_override_font_sizes/font_size = 28
+offset_left = 65.0
+offset_top = 65.0
+offset_right = 135.0
+offset_bottom = 135.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_joystick_stick")
 
 [node name="JumpButton" type="Button" parent="CanvasLayer/TouchControls"]
 layout_mode = 1

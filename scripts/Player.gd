@@ -273,12 +273,18 @@ func _physics_process(delta: float) -> void:
 		velocity.y = JUMP_VELOCITY
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	if external_move.length() > 0.1:
+	if external_move.length_squared() > 0.01:
 		input_dir = external_move
-	var dir := Vector3(input_dir.x, 0, input_dir.y).normalized()
-	if dir.length() > 0:
+	var strength := clampf(Vector2(input_dir.x, input_dir.y).length(), 0.0, 1.0)
+	if strength > 0.12:
+		# Movimento livre de 360°: a intensidade do joystick vira velocidade
+		# analógica e o astronauta gira suavemente para a direção do movimento.
+		var dir := Vector3(input_dir.x, 0.0, input_dir.y)
+		if dir.length() > 1.0:
+			dir = dir.normalized()
 		velocity.x = dir.x * SPEED
 		velocity.z = dir.z * SPEED
+		rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.z), clampf(delta * 10.0, 0.0, 1.0))
 	else:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 		velocity.z = move_toward(velocity.z, 0, SPEED)

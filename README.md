@@ -2,13 +2,13 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.3.4** — robô de missões e beliche na nave, combate com animais, contador de dias e clima no HUD.
+**Versão do código: 0.3.5** — interior da nave como cenário separado, cobras noturnas na floresta, joystick analógico de 360° e otimização para Android.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.3.4-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.4)
+[![Release](https://img.shields.io/badge/release-v0.3.5-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.5)
 
-[⬇️ Baixar Astrofilia.apk (v0.3.4)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.4/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.3.5)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.5/Astrofilia.apk)
 
 ## 📖 História
 
@@ -38,7 +38,9 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - Caixa de texto vermelha no topo com missões sequenciais (8 do Coletor + 8 do Biólogo)
 - Missões alternadas no singleplayer e por função no multiplayer
 - Missão final: "Virem juntos para casa! Ativem o console da nave" / "Volte para casa! Ative o console da nave"
+- **Interior da nave como cenário separado**: ao subir a rampa, o jogo carrega uma sala própria (console, ARIA, beliche, janelas e escotilha); sair pela escotilha recarrega o planeta no ponto da rampa
 - **ARIA, a robô de missões**: dentro da nave, conversa com o jogador, apresenta a missão atual, o progresso e dicas; também aponta o console quando tudo for concluído
+- **Cobras noturnas na floresta**: aparecem só à noite, dão o bote quando o jogador se aproxima, podem ser atacadas e derrotadas, e reaparecem depois
 - **Beliche de duas camas**: dentro da nave, permite dormir à noite, avançar até o amanhecer, recuperar vida e iniciar um novo dia
 - **Desfecho narrativo**: ao concluir as 16 missões, ative o console no fundo da nave para ver a tela final com nível, pontos, recursos e missões concluídas; escolha **Continuar explorando** ou voltar ao **Menu principal**
 - **Capítulos**: aviso central de 3 segundos ("CAPÍTULO 1", "CAPÍTULO 2"...) ao avançar o progresso, com bônus de XP
@@ -59,7 +61,8 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - **Céu espacial**: planeta gigante com anéis, lua distante, estrelas, sol em órbita e névoa atmosférica
 - Pausa, Game Over e reinício
 - Conquistas (incluindo **Voltou para casa**) e salvamento automático
-- Controles por teclado e touch (joystick virtual + botões)
+- Controles por teclado e touch: **joystick analógico de 360°** com velocidade proporcional à inclinação, além dos botões de pular e ação
+- **Otimização para Android**: sombras de cenário desligadas, menos props, partículas e estrelas, terreno com menos subdivisões e escala 3D reduzida — sem mudar o visual no desktop
 - Menu com 2 slots de save, idioma (PT/EN/ES), aparência, volumes e modo de jogo
 - Salvamento avançado com JSON (placeholders, progresso e cooldown de itens)
 - Ícone do aplicativo: foguete com o nome **Astrofilia**
@@ -83,7 +86,8 @@ Astrofilia/
 │   ├── Cutscene.gd
 │   ├── Gameplay.gd
 │   ├── Player.gd
-│   └── ItemColetavel.gd
+│   ├── ItemColetavel.gd
+│   └── Snake.gd
 └── assets/
     ├── environment.tres
     ├── biome_ground.gdshader
@@ -118,10 +122,10 @@ O APK de depuração é gerado em `build/Astrofilia.apk`.
 
 | Ação | Teclado | Touch |
 |------|---------|-------|
-| Mover | WASD / Setas | Joystick virtual |
+| Mover | WASD / Setas | Joystick analógico (360°) |
 | Pular | Espaço | Botão ⬆ |
 | Coletar / analisar / beber / atacar | E, próximo ao alvo | Botão ✋ |
-| Falar com ARIA / dormir no beliche | E, dentro da nave | Botão ✋ |
+| Falar com ARIA / dormir / sair da nave | E, dentro da nave | Botão ✋ |
 | Pausar | — | Botão ⏸ |
 
 ## 📄 Licença
@@ -153,13 +157,13 @@ XDG_DATA_HOME=/tmp/astrofilia-tests godot --headless --path . --log-file /tmp/as
 
 Verifica coleta única, reaparecimento de recursos, hidratação, as 16 missões do singleplayer, pausa e mapeamento de W/S. O diretório temporário isola os saves do teste.
 
-Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais, combate, ARIA, beliche, limite do planeta e desfecho:
+Teste de capítulos, nível/EXP, clima, relógio, shader do terreno, lago, nave, animais, combate, cobras, interior da nave, ARIA, beliche, limite do planeta e desfecho:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-progress-tests godot --headless --path . --log-file /tmp/astrofilia-progress-tests.log --script tests/progression.gd
 ```
 
-Teste de colisão real da rampa da nave e do bloqueio do lago:
+Teste de colisão real da rampa, da troca para o cenário interior e do bloqueio do lago:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-ship-tests godot --headless --path . --log-file /tmp/astrofilia-ship-tests.log --script tests/ship_walk.gd
@@ -186,10 +190,16 @@ O modo por função ainda é local; conexão multiplayer não está implementada
 
 ## Controles com duas mãos no Android
 
-Use o polegar esquerdo nas setas de movimento e o direito em **PULAR** ou **AÇÃO**. Os toques são identificados separadamente, permitindo mover enquanto pula ou coleta. Arrastar o dedo entre as setas muda a direção; soltar fora do botão, pausar ou sair do app interrompe o movimento.
+Use o polegar esquerdo no **joystick analógico** e o direito em **PULAR** ou **AÇÃO**. Os toques são identificados separadamente, permitindo mover enquanto pula ou coleta. Inclinar mais o joystick acelera o astronauta e arrastar o dedo para fora da base continua controlando a direção; pausar ou sair do app interrompe o movimento.
 
 Teste de toques simultâneos:
 
 ```bash
 XDG_DATA_HOME=/tmp/astrofilia-touch-tests godot --headless --path . --log-file /tmp/astrofilia-touch-tests.log --script tests/multitouch.gd
+```
+
+Teste do orçamento gráfico móvel (sombras, escala 3D, terreno, estrelas e partículas):
+
+```bash
+XDG_DATA_HOME=/tmp/astrofilia-mobile-tests godot --headless --path . --log-file /tmp/astrofilia-mobile-tests.log --script tests/mobile_budget.gd
 ```
