@@ -21,6 +21,8 @@ var sfx_volume: float = 1.0
 var music_volume: float = 1.0
 var appearance: String = "default"
 var singleplayer: bool = true
+# Sessão online por IP: não grava nos slots locais.
+var online: bool = false
 var role: String = "collector"
 var achievements: Array[String] = []
 var saved_games: Array[Dictionary] = []
@@ -68,7 +70,12 @@ const CHAPTERS := {
 var translations := {
 	"pt": {
 		"play": "Jogar", "options": "Opções", "back": "Voltar",
-		"singleplayer": "Um jogador", "multiplayer": "Multijogador",
+		"singleplayer": "Um jogador", "multiplayer": "Multijogador (local)",
+		"online_play": "Jogar online (IP)", "online_title": "MULTIPLAYADOR ONLINE",
+		"online_name": "Seu nome", "online_ip": "IP do host", "online_port": "Porta",
+		"online_role": "Sua função", "online_host": "Criar sala (host)",
+		"online_join": "Entrar na sala", "online_waiting": "Sala criada. Aguardando jogadores...",
+		"online_connecting": "Conectando...", "online_hint": "O host abre a sala; os outros entram com o IP e a porta.",
 		"new_game": "Novo jogo", "save_slot": "Jogo salvo", "empty_slot": "Vazio",
 		"language": "Idioma", "appearance": "Aparência", "sound": "Efeitos sonoros",
 		"music": "Música", "username": "Nome de usuário", "achievements": "Conquistas",
@@ -88,7 +95,12 @@ var translations := {
 	},
 	"en": {
 		"play": "Play", "options": "Options", "back": "Back",
-		"singleplayer": "Singleplayer", "multiplayer": "Multiplayer",
+		"singleplayer": "Singleplayer", "multiplayer": "Multiplayer (local)",
+		"online_play": "Play online (IP)", "online_title": "ONLINE MULTIPLAYER",
+		"online_name": "Your name", "online_ip": "Host IP", "online_port": "Port",
+		"online_role": "Your role", "online_host": "Create room (host)",
+		"online_join": "Join room", "online_waiting": "Room created. Waiting for players...",
+		"online_connecting": "Connecting...", "online_hint": "The host opens the room; others join with the IP and port.",
 		"new_game": "New game", "save_slot": "Saved game", "empty_slot": "Empty",
 		"language": "Language", "appearance": "Appearance", "sound": "Sound effects",
 		"music": "Music", "username": "Username", "achievements": "Achievements",
@@ -108,7 +120,12 @@ var translations := {
 	},
 	"es": {
 		"play": "Jugar", "options": "Opciones", "back": "Volver",
-		"singleplayer": "Un jugador", "multiplayer": "Multijugador",
+		"singleplayer": "Un jugador", "multiplayer": "Multijugador (local)",
+		"online_play": "Jugar en línea (IP)", "online_title": "MULTIJUGADOR EN LÍNEA",
+		"online_name": "Tu nombre", "online_ip": "IP del host", "online_port": "Puerto",
+		"online_role": "Tu función", "online_host": "Crear sala (host)",
+		"online_join": "Entrar a la sala", "online_waiting": "Sala creada. Esperando jugadores...",
+		"online_connecting": "Conectando...", "online_hint": "El host abre la sala; los demás entran con la IP y el puerto.",
 		"new_game": "Nuevo juego", "save_slot": "Juego guardado", "empty_slot": "Vacío",
 		"language": "Idioma", "appearance": "Apariencia", "sound": "Efectos de sonido",
 		"music": "Música", "username": "Nombre de usuario", "achievements": "Logros",
@@ -439,6 +456,23 @@ func begin_new_game(slot: int, create_new: bool = true) -> Error:
 	saved_games[target] = slot_data
 	return OK
 
+func start_online_session(p_name: String, p_role: String, p_appearance: String) -> void:
+	# Sessão online: estado novo em memória, sem tocar nos slots salvos.
+	online = true
+	singleplayer = false
+	player_name = p_name.left(24)
+	role = p_role
+	appearance = p_appearance
+	active_slot = -1
+	pending_snapshot.clear()
+	interior_snapshot.clear()
+	in_interior = false
+	pending_ending = false
+	current_mission_index = 0
+	current_mission_progress = 0
+	missions_complete = false
+	build_mission_list()
+
 func has_snapshot(slot: int) -> bool:
 	if slot < 0 or slot >= saved_games.size():
 		return false
@@ -487,6 +521,7 @@ func prepare_continue(slot: int) -> bool:
 	if snapshot.get("role") is String:
 		role = snapshot["role"]
 	active_slot = slot
+	online = false
 	pending_snapshot = snapshot.duplicate(true)
 	in_interior = bool(pending_snapshot.get("in_interior", false))
 	interior_snapshot = pending_snapshot.duplicate(true)

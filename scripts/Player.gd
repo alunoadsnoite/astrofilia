@@ -7,10 +7,39 @@ const GRAVITY := 9.8
 var score: int = 0
 var suit_color: Color = Color("edf1e8")
 
+# Avatar remoto: não lê input, não entra no grupo "player" e recebe a
+# transformação pela rede.
+var remote_mode := false
+var appearance_override := ""
+var player_name_override := ""
+
 func _ready() -> void:
-	add_to_group("player")
-	suit_color = {"default": Color("edf1e8"), "blue": Color("438bd1"), "red": Color("d86b62"), "green": Color("64b38c")}.get(GameManager.appearance, Color("edf1e8"))
+	if remote_mode:
+		set_physics_process(false)
+	else:
+		add_to_group("player")
+	var appearance := appearance_override if remote_mode and appearance_override != "" else GameManager.appearance
+	suit_color = {"default": Color("edf1e8"), "blue": Color("438bd1"), "red": Color("d86b62"), "green": Color("64b38c")}.get(appearance, Color("edf1e8"))
 	_build_model()
+	if remote_mode:
+		_build_name_tag()
+
+func _build_name_tag() -> void:
+	var tag := Label3D.new()
+	tag.name = "NameTag"
+	tag.text = player_name_override if player_name_override != "" else "Jogador"
+	tag.position = Vector3(0, 1.75, 0)
+	tag.font_size = 40
+	tag.outline_size = 10
+	tag.modulate = Color("ffffff")
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.no_depth_test = true
+	add_child(tag)
+
+func set_remote_collision(enabled: bool) -> void:
+	var shape := get_node_or_null("Collision")
+	if shape is CollisionShape3D:
+		shape.disabled = not enabled
 
 func _build_model() -> void:
 	# Esconder mesh padrão
@@ -266,6 +295,8 @@ func _build_model() -> void:
 var external_move: Vector2 = Vector2.ZERO
 
 func _physics_process(delta: float) -> void:
+	if remote_mode:
+		return
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
 

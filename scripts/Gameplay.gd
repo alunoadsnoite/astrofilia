@@ -139,13 +139,24 @@ var joystick_index: int = -1
 var joystick_vector: Vector2 = Vector2.ZERO
 const JOYSTICK_DEADZONE := 0.12
 
+# --- Multiplayer online por IP ---
+var remote_root: Node3D
+var net_players: Dictionary = {}
+var net_targets: Dictionary = {}
+var net_send_timer: float = 0.0
+var net_snake_timer: float = 0.0
+var net_label: Label
+
 func _ready() -> void:
 	add_to_group("hud")
 	if GameManager.mission_list.is_empty():
 		GameManager.build_mission_list()
 	var incoming: Dictionary = GameManager.pending_snapshot
 	GameManager.in_interior = GameManager.in_interior or bool(incoming.get("in_interior", false))
-	world_seed = int(incoming.get("world_seed", randi()))
+	if Net.in_session:
+		world_seed = Net.world_seed
+	else:
+		world_seed = int(incoming.get("world_seed", randi()))
 	scenery_rng.seed = world_seed
 	exterior_return = _vec3_from(incoming.get("interior_return", [ship_position.x, 1.0, ship_position.z + 5.0]))
 	exterior_cooldowns = incoming.get("exterior_cooldowns", incoming.get("resource_cooldowns", []))
@@ -170,6 +181,8 @@ func _ready() -> void:
 	_setup_touch()
 	_restore_snapshot(incoming)
 	GameManager.pending_snapshot.clear()
+	if Net.in_session:
+		_setup_network()
 	if not GameManager.in_interior and weather_timer <= 0.0:
 		weather_timer = randf_range(20.0, 40.0)
 	_update_day_night()
@@ -219,6 +232,216 @@ func _vec3_from(value: Variant, fallback: Vector3 = Vector3.ZERO) -> Vector3:
 	elif value is Vector3:
 		return value
 	return fallback
+
+func _setup_network() -> void:
+	GameManager.online = true
+	GameManager.singleplayer = false
+	GameManager.role = Net.local_role
+	if GameManager.mission_list.is_empty():
+		GameManager.build_mission_list()
+	remote_root = Node3D.new()
+	remote_root.name = "RemotePlayers"
+	add_child(remote_root)
+	if not Net.remote_state.is_connected(_on_net_remote_state):
+		Net.remote_state.connect(_on_net_remote_state)
+	if not Net.peer_joined.is_connected(_on_net_peer_joined):
+		Net.peer_joined.connect(_on_net_peer_joined)
+	if not Net.peer_left.is_connected(_on_net_peer_left):
+		Net.peer_left.connect(_on_net_peer_left)
+	if not Net.item_state.is_connected(_on_net_item_state):
+		Net.item_state.connect(_on_net_item_state)
+	if not Net.snake_state.is_connected(_on_net_snake_state):
+		Net.snake_state.connect(_on_net_snake_state)
+	if not Net.snake_hit_requested.is_connected(_on_net_snake_hit_requested):
+		Net.snake_hit_requested.connect(_on_net_snake_hit_requested)
+	if not Net.snake_killed.is_connected(_on_net_snake_killed):
+		Net.snake_killed.connect(_on_net_snake_killed)
+	if not Net.session_ended.is_connected(_on_net_session_ended):
+		Net.session_ended.connect(_on_net_session_ended)
+	for id in Net.peers.keys():
+		var pid := int(id)
+		if pid != multiplayer.get_unique_id():
+			_spawn_remote(pid, Net.peers[id])
+	if not multiplayer.is_server():
+		# Clientes recebem as cobras prontas do host.
+		for snake in snakes:
+			if is_instance_valid(snake):
+				snake.remote_mode = true
+				snake.set_process(true)
+				snake.set_active(false)
+	_setup_net_hud()
+	_send_net_state()
+
+func _setup_net_hud() -> void:
+	net_label = Label.new()
+	net_label.name = "NetLabel"
+	net_label.anchor_left = 1.0
+	net_label.anchor_right = 1.0
+	net_label.offset_left = -560.0
+	net_label.offset_right = -16.0
+	net_label.offset_top = 96.0
+	net_label.offset_bottom = 122.0
+	net_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	net_label.add_theme_font_size_override("font_size", 16)
+	net_label.add_theme_color_override("font_color", Color("9feeff"))
+	net_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	$CanvasLayer/HUD.add_child(net_label)
+	_update_net_hud()
+
+func _update_net_hud() -> void:
+	if not is_instance_valid(net_label):
+		return
+	var role := "Coletor" if GameManager.role == "collector" else "Biólogo"
+	var host_tag := "host" if Net.is_host else "cliente"
+	var address := Net.address_hint()
+	var suffix := "" if address == "" else " • " + address
+	net_label.text = "🌐 Online %d/%d • %s • %s%s" % [Net.player_count(), Net.MAX_PLAYERS, role, host_tag, suffix]
+
+func _spawn_remote(id: int, info: Dictionary) -> void:
+	if id == multiplayer.get_unique_id() or net_players.has(id):
+		return
+	if not is_instance_valid(remote_root):
+		return
+	var rp: CharacterBody3D = load("res://scenes/Player.tscn").instantiate()
+	rp.name = "Remote%d" % id
+	rp.remote_mode = true
+	rp.appearance_override = String(info.get("appearance", "default"))
+	rp.player_name_override = String(info.get("name", "Jogador"))
+	remote_root.add_child(rp)
+	net_players[id] = rp
+	net_targets.erase(id)
+
+func _send_net_state() -> void:
+	if not Net.in_session or not is_instance_valid(player):
+		return
+	var loc := 1 if _is_interior() else 0
+	var planar := Vector2(player.velocity.x, player.velocity.z).length()
+	Net.send_state(player.global_position, player.rotation.y, loc, planar)
+
+func _update_network(delta: float) -> void:
+	net_send_timer -= delta
+	if net_send_timer <= 0.0:
+		net_send_timer = 0.06
+		_send_net_state()
+	_update_remote_players(delta)
+	if multiplayer.is_server():
+		net_snake_timer -= delta
+		if net_snake_timer <= 0.0:
+			net_snake_timer = 0.1
+			_broadcast_snake_states()
+
+func _update_remote_players(delta: float) -> void:
+	var my_loc := 1 if _is_interior() else 0
+	for id in net_players.keys():
+		var rp = net_players[id]
+		if not is_instance_valid(rp):
+			net_players.erase(id)
+			continue
+		var target: Dictionary = net_targets.get(id, {})
+		var same_location: bool = not target.is_empty() and int(target.get("loc", -1)) == my_loc
+		rp.visible = same_location
+		if rp.has_meta("net_collision") and bool(rp.get_meta("net_collision")) != same_location:
+			rp.set_meta("net_collision", same_location)
+			rp.set_remote_collision(same_location)
+		elif not rp.has_meta("net_collision"):
+			rp.set_meta("net_collision", same_location)
+			rp.set_remote_collision(same_location)
+		if same_location:
+			var pos: Vector3 = target["pos"]
+			var k := 1.0 - exp(-16.0 * delta)
+			rp.global_position = rp.global_position.lerp(pos, k)
+			rp.rotation.y = lerp_angle(rp.rotation.y, float(target["rot"]), clampf(delta * 12.0, 0.0, 1.0))
+
+func _on_net_remote_state(id: int, pos: Vector3, rot_y: float, loc: int, speed: float) -> void:
+	if id == multiplayer.get_unique_id():
+		return
+	if not net_players.has(id):
+		if not Net.peers.has(id):
+			return
+		_spawn_remote(id, Net.peers[id])
+	net_targets[id] = {"pos": pos, "rot": rot_y, "loc": loc, "speed": speed}
+
+func _on_net_peer_joined(id: int, info: Dictionary) -> void:
+	if id == multiplayer.get_unique_id():
+		return
+	_spawn_remote(id, info)
+	_update_net_hud()
+	_show_popup("🌐 %s entrou na sessão" % String(info.get("name", "Jogador")))
+
+func _on_net_peer_left(id: int) -> void:
+	if net_players.has(id):
+		var rp = net_players[id]
+		if is_instance_valid(rp):
+			rp.queue_free()
+		net_players.erase(id)
+	net_targets.erase(id)
+	_update_net_hud()
+
+func _on_net_item_state(index: int, available: bool, cooldown: float) -> void:
+	if _is_interior():
+		return
+	if index < 0 or index >= items_node.get_child_count():
+		return
+	var it = items_node.get_child(index)
+	if is_instance_valid(it) and it.has_method("restore_cooldown"):
+		it.restore_cooldown(0.0 if available else maxf(0.05, cooldown))
+
+func _broadcast_snake_states() -> void:
+	if not Net.in_session or not multiplayer.is_server():
+		return
+	var states: Array = []
+	for snake in snakes:
+		if not is_instance_valid(snake):
+			states.append({})
+			continue
+		states.append({
+			"pos": snake.global_position,
+			"rot": snake.visual.rotation.y if is_instance_valid(snake.visual) else 0.0,
+			"active": snake.active,
+			"health": snake.health,
+			"visible": snake.visible,
+		})
+	Net.broadcast_snakes(states)
+
+func _on_net_snake_state(states: Array) -> void:
+	if multiplayer.is_server():
+		return
+	for i in range(mini(states.size(), snakes.size())):
+		var state: Dictionary = states[i]
+		if state.is_empty():
+			continue
+		if is_instance_valid(snakes[i]) and snakes[i].has_method("remote_apply"):
+			snakes[i].remote_apply(state)
+
+func _on_net_snake_hit_requested(index: int, damage: float, attacker_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	if index < 0 or index >= snakes.size():
+		return
+	var snake = snakes[index]
+	if not is_instance_valid(snake) or not snake.active or snake.health <= 0.0:
+		return
+	snake.hit(damage, player)
+	Sfx.play("click")
+	if snake.health <= 0.0:
+		_grant_snake_kill(attacker_id)
+		Net.notify_snake_killed(index, attacker_id)
+
+func _on_net_snake_killed(_index: int, attacker_id: int) -> void:
+	if attacker_id == multiplayer.get_unique_id():
+		_grant_snake_kill(attacker_id)
+
+func _on_net_session_ended(reason: String) -> void:
+	GameManager.online = false
+	GameManager.in_interior = false
+	GameManager.pending_snapshot.clear()
+	Net.leave()
+	get_tree().paused = false
+	_show_popup("🌐 " + reason)
+	var tree := get_tree()
+	await tree.create_timer(1.2).timeout
+	if is_instance_valid(self) and is_inside_tree():
+		tree.change_scene_to_file("res://scenes/MainMenu.tscn")
 
 func _process(delta: float) -> void:
 	if paused or game_over:
@@ -276,6 +499,8 @@ func _process(delta: float) -> void:
 		var clock := Time.get_ticks_msec() * 0.001
 		robot_root.rotation.y = sin(clock * 0.9) * 0.12
 		robot_root.position.y = 0.1 + sin(clock * 1.6) * 0.015
+	if Net.in_session:
+		_update_network(delta)
 	_update_mission()
 	_check_chapter()
 	_update_hint()
@@ -447,7 +672,7 @@ func _spawn_items() -> void:
 		it.tipo_item = types[idx]
 		it.lake_center = lake_position
 		it.ship_center = ship_position
-		it.collected.connect(_on_item_collected)
+		it.collected.connect(_on_item_collected.bind(i))
 		items_node.add_child(it)
 
 func _create_snakes() -> void:
@@ -477,6 +702,9 @@ func _create_snakes() -> void:
 		snake.set_active(false)
 
 func _update_snakes(_delta: float) -> void:
+	if Net.in_session and not multiplayer.is_server():
+		# As cobras são simuladas pelo host e replicadas para os clientes.
+		return
 	if snakes.is_empty() or not is_instance_valid(player):
 		return
 	var night := _is_night()
@@ -504,20 +732,32 @@ func _nearest_snake() -> Node3D:
 func _attack_snake(snake: Node3D) -> void:
 	if not is_instance_valid(snake) or not snake.active:
 		return
+	if Net.in_session and not multiplayer.is_server():
+		var idx := snakes.find(snake)
+		if idx >= 0:
+			Net.request_snake_hit(idx, 12.0)
+			_show_popup("⚔ Atacando a cobra...")
+		return
 	snake.hit(12.0, player)
 	Sfx.play("click")
 	if snake.health <= 0.0:
-		_gain_xp(12)
-		set_score(score + 15)
-		_show_popup("🐍 Cobra derrotada! O caminho da floresta está mais seguro.")
+		_grant_snake_kill(1)
 	else:
 		_gain_xp(4)
 		_show_popup("⚔ Cobra %d/%d ❤ • ela vai dar o bote!" % [int(ceil(snake.health)), int(snake.max_health)])
 
+func _grant_snake_kill(attacker_id: int) -> void:
+	if Net.in_session and attacker_id != multiplayer.get_unique_id():
+		return
+	_gain_xp(12)
+	set_score(score + 15)
+	GameManager.add_achievement("Caçador de cobras")
+	_show_popup("🐍 Cobra derrotada! O caminho da floresta está mais seguro.")
+
 func _on_snake_defeated() -> void:
 	GameManager.add_achievement("Caçador de cobras")
 
-func _on_item_collected(type: String) -> void:
+func _on_item_collected(type: String, index: int = -1) -> void:
 	Sfx.play("collect")
 	inventory[type] = inventory.get(type, 0) + 1
 	_update_inventory()
@@ -538,6 +778,9 @@ func _on_item_collected(type: String) -> void:
 			_show_popup("+1 %s" % type)
 	_update_bars()
 	_gain_xp(10)
+	if Net.in_session and index >= 0:
+		# Recursos são compartilhados: todos veem o item sumir e renascer.
+		Net.broadcast_item(index, false, 12.0)
 	var completed: bool = GameManager.register_action("collect", type)
 	_update_mission()
 	if completed:
@@ -1802,6 +2045,9 @@ func _close_ending() -> void:
 	touch_controls.visible = DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
 
 func _ending_to_menu() -> void:
+	if GameManager.online:
+		Net.leave()
+		GameManager.online = false
 	GameManager.in_interior = false
 	GameManager.interior_snapshot.clear()
 	GameManager.pending_snapshot.clear()
@@ -2088,7 +2334,10 @@ func _toggle_pause() -> void:
 		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Salvamento automático a cada 10s"
 
 func _quit_to_menu() -> void:
-	if not game_over and _save_progress() != OK:
+	if GameManager.online:
+		Net.leave()
+		GameManager.online = false
+	elif not game_over and _save_progress() != OK:
 		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Falha ao salvar. Tente novamente."
 		return
 	GameManager.in_interior = false
@@ -2203,6 +2452,9 @@ func _restore_snapshot(snapshot: Dictionary) -> void:
 	_update_level_ui()
 
 func _save_progress() -> Error:
+	if GameManager.online:
+		# Sessões online não gravam nos slots locais.
+		return OK
 	if game_over or health <= 0:
 		return OK # Preserve the last living checkpoint.
 	if GameManager.active_slot < 0:
@@ -2221,12 +2473,17 @@ func _save_progress() -> Error:
 	return GameManager.save_game()
 
 func _autosave() -> void:
+	if GameManager.online:
+		return
 	var error := _save_progress()
 	if error != OK and not save_error_shown:
 		_show_popup("Não foi possível salvar a partida")
 	save_error_shown = error != OK
 
 func _manual_save() -> void:
+	if GameManager.online:
+		$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Salvamento indisponível no modo online"
+		return
 	var error := _save_progress()
 	$CanvasLayer/PausePanel/PauseVBox/SaveStatus.text = "Partida salva" if error == OK else "Falha ao salvar. Tente novamente."
 
@@ -2237,7 +2494,10 @@ func _notification(what: int) -> void:
 		_clear_touch()
 		_autosave()
 	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
-		if _save_progress() == OK:
+		if GameManager.online:
+			Net.leave()
+			get_tree().quit()
+		elif _save_progress() == OK:
 			get_tree().quit()
 		else:
 			_show_popup("Falha ao salvar. Salve no menu de pausa antes de sair.")

@@ -2,13 +2,13 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.3.5** — interior da nave como cenário separado, cobras noturnas na floresta, joystick analógico de 360° e otimização para Android.
+**Versão do código: 0.4.0** — multiplayer online por IP (host e cliente), interior da nave como cenário separado, cobras noturnas, joystick analógico de 360° e otimização para Android.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.3.5-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.3.5)
+[![Release](https://img.shields.io/badge/release-v0.4.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.4.0)
 
-[⬇️ Baixar Astrofilia.apk (v0.3.5)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.3.5/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.4.0)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.4.0/Astrofilia.apk)
 
 ## 📖 História
 
@@ -23,7 +23,41 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 ## 🎮 Modos de jogo
 
 - **Singleplayer**: você é Coletor e Biólogo ao mesmo tempo.
-- **Multiplayer**: escolha sua função (Coletor ou Biólogo).
+- **Multijogador local**: escolha sua função (Coletor ou Biólogo) no mesmo dispositivo.
+- **Multijogador online por IP**: até 4 jogadores em rede, com host e clientes (veja a seção abaixo).
+
+## 🌐 Multiplayer online por IP
+
+O host é a autoridade da sessão e compartilha o mundo com os convidados:
+
+- A **seed do planeta** é escolhida pelo host e enviada aos clientes, então recursos, lagos, nave e cobras ficam nas mesmas posições.
+- **Avatares remotos** usam o mesmo astronauta, com nome flutuante e a aparência escolhida por cada jogador.
+- **Itens são compartilhados**: quando alguém coleta, o recurso some para todos e reaparece após 12 segundos.
+- **Cobras** são simuladas pelo host e replicadas com posição, vida e visibilidade; o dano de clientes é validado pelo host.
+- Cada jogador conclui as próprias missões da sua função, com NV/EXP e conquistas locais.
+- Entrar e sair da nave é individual: o avatar remoto fica oculto quando o outro jogador está em outro cenário.
+- Sessões online **não gravam nos slots locais**; ao sair, o progresso online é encerrado.
+
+**Como hospedar**
+
+1. No menu, abra **Jogar → Jogar online (IP)**.
+2. Informe seu nome, escolha a função e toque em **Criar sala (host)**.
+3. Compartilhe seu IP e a porta (padrão **7911/UDP**) com os outros jogadores.
+
+**Como entrar**
+
+1. Abra **Jogar → Jogar online (IP)**.
+2. Informe o nome, a função, o **IP do host** e a porta.
+3. Toque em **Entrar na sala**. A conexão tem tempo limite de 8 segundos.
+
+Na mesma rede, use o IP local do host (por exemplo `192.168.0.10`). Pela internet, o host precisa liberar/encaminhar a porta UDP no roteador. Não há matchmaking nem travessia de NAT: a conexão é direta por IP. Todos devem usar a mesma versão do jogo.
+
+**Limitações da v1 online**
+
+- Máximo de 4 jogadores por sala.
+- A IA de animais e do clima continua local em cada cliente; pequenas diferenças visuais são esperadas.
+- As cobras perseguem o jogador do host; clientes podem atacá-las e recebem o crédito da derrota.
+- Não há reconexão automática: se o host fechar a sala, os clientes voltam ao menu.
 
 ### ⛏️ Coletor
 - Facão para coletar plantas
@@ -63,6 +97,7 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 - Conquistas (incluindo **Voltou para casa**) e salvamento automático
 - Controles por teclado e touch: **joystick analógico de 360°** com velocidade proporcional à inclinação, além dos botões de pular e ação
 - **Otimização para Android**: sombras de cenário desligadas, menos props, partículas e estrelas, terreno com menos subdivisões e escala 3D reduzida — sem mudar o visual no desktop
+- **Multiplayer online por IP (ENet)**: host autoritativo, até 4 jogadores, seed compartilhada, avatares com nome, itens e cobras sincronizados
 - Menu com 2 slots de save, idioma (PT/EN/ES), aparência, volumes e modo de jogo
 - Salvamento avançado com JSON (placeholders, progresso e cooldown de itens)
 - Ícone do aplicativo: foguete com o nome **Astrofilia**
@@ -82,6 +117,7 @@ Astrofilia/
 ├── scripts/
 │   ├── GameManager.gd   (autoload)
 │   ├── Sfx.gd           (autoload de efeitos sonoros)
+│   ├── Net.gd           (autoload de rede ENet)
 │   ├── MainMenu.gd
 │   ├── Cutscene.gd
 │   ├── Gameplay.gd
@@ -169,6 +205,17 @@ Teste de colisão real da rampa, da troca para o cenário interior e do bloqueio
 XDG_DATA_HOME=/tmp/astrofilia-ship-tests godot --headless --path . --log-file /tmp/astrofilia-ship-tests.log --script tests/ship_walk.gd
 ```
 
+## Testes de rede
+
+Os testes sobem dois processos Godot headless em localhost e validam o ENet de verdade: registro de jogadores, seed, estado, itens e cobras.
+
+```bash
+./tests/net_session.sh
+./tests/net_gameplay.sh
+```
+
+O primeiro cobre os RPCs do autoload `Net`; o segundo roda `Gameplay.tscn` dos dois lados e valida avatares remotos, nomes, posição e coleta compartilhada de itens.
+
 ## Salvamento e aparência
 
 - Cada um dos dois slots guarda posição, vida, fome, hidratação, inventário, pontos, contador de dias e progresso parcial das missões.
@@ -186,7 +233,7 @@ Teste adicional de persistência, slots, fluxo do menu, trajes e missões por fu
 XDG_DATA_HOME=/tmp/astrofilia-save-tests godot --headless --path . --log-file /tmp/astrofilia-save-tests.log --script tests/save_roundtrip.gd
 ```
 
-O modo por função ainda é local; conexão multiplayer não está implementada.
+O modo por função continua disponível localmente; para jogar em rede, use **Jogar online (IP)** e siga a seção de multiplayer online.
 
 ## Controles com duas mãos no Android
 

@@ -118,6 +118,11 @@ custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "Jogo salvo 2 (vazio)"
 
+[node name="OnlineButton" type="Button" parent="PlayPanel/PlayVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Jogar online (IP)"
+
 [node name="PlayBackButton" type="Button" parent="PlayPanel/PlayVBox"]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
@@ -264,6 +269,104 @@ layout_mode = 2
 size_flags_vertical = 3
 
 [node name="AchievementsBackButton" type="Button" parent="AchievementsPanel/AchievementsVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Voltar"
+
+[node name="OnlinePanel" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -280.0
+offset_right = 300.0
+offset_bottom = 280.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="OnlineVBox" type="VBoxContainer" parent="OnlinePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="OnlineTitle" type="Label" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "MULTIPLAYADOR ONLINE"
+horizontal_alignment = 1
+
+[node name="OnlineNameLabel" type="Label" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+text = "Seu nome"
+
+[node name="OnlineNameEdit" type="LineEdit" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+placeholder_text = "Astronauta"
+max_length = 24
+
+[node name="OnlineAddressLabel" type="Label" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+text = "IP do host e porta"
+
+[node name="OnlineAddressBox" type="HBoxContainer" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="OnlineIPEdit" type="LineEdit" parent="OnlinePanel/OnlineVBox/OnlineAddressBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "127.0.0.1"
+text = "127.0.0.1"
+
+[node name="OnlinePortEdit" type="LineEdit" parent="OnlinePanel/OnlineVBox/OnlineAddressBox"]
+custom_minimum_size = Vector2(96, 0)
+layout_mode = 2
+placeholder_text = "7911"
+text = "7911"
+max_length = 5
+
+[node name="OnlineRoleLabel" type="Label" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+text = "Sua função"
+
+[node name="OnlineRoleOption" type="OptionButton" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+
+[node name="OnlineHint" type="Label" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+text = "O host abre a sala; os outros entram com o IP e a porta."
+autowrap_mode = 2
+
+[node name="OnlineHostButton" type="Button" parent="OnlinePanel/OnlineVBox"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "Criar sala (host)"
+
+[node name="OnlineJoinButton" type="Button" parent="OnlinePanel/OnlineVBox"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "Entrar na sala"
+
+[node name="OnlineStatus" type="Label" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+text = ""
+autowrap_mode = 2
+horizontal_alignment = 1
+
+[node name="OnlineBackButton" type="Button" parent="OnlinePanel/OnlineVBox"]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 text = "Voltar"

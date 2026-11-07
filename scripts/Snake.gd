@@ -12,6 +12,8 @@ signal defeated
 
 var health := 24.0
 var active := false
+# No cliente, a cobra é um fantoche: o host manda posição, vida e visibilidade.
+var remote_mode := false
 var visual: Node3D
 var body_parts: Array[MeshInstance3D] = []
 var home_position := Vector3.ZERO
@@ -143,6 +145,9 @@ func _wander_pick() -> void:
 	wander_timer = _rng.randf_range(1.0, 2.8)
 
 func _process(delta: float) -> void:
+	if remote_mode:
+		_animate(delta)
+		return
 	if not active:
 		return
 	attack_timer = maxf(0.0, attack_timer - delta)
@@ -241,6 +246,16 @@ func _respawn() -> void:
 	if active:
 		visible = true
 		set_process(true)
+
+func remote_apply(state: Dictionary) -> void:
+	if not remote_mode:
+		return
+	global_position = state.get("pos", global_position)
+	if is_instance_valid(visual):
+		visual.rotation.y = float(state.get("rot", visual.rotation.y))
+	active = bool(state.get("active", false))
+	health = float(state.get("health", health))
+	visible = bool(state.get("visible", active)) and health > 0.0
 
 func reset_for_night() -> void:
 	health = max_health
