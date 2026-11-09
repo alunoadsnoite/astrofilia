@@ -25,6 +25,10 @@ signal snake_killed(index: int, attacker_id: int)
 
 const DEFAULT_PORT := 7911
 const MAX_PLAYERS := 4
+# Descoberta automática na mesma rede Wi-Fi (UDP broadcast).
+const DISCOVERY_PORT := 7912
+const DISCOVERY_PROBE := "ASTROFILIA_DISCOVER_V1"
+const DISCOVERY_MAGIC := "ASTROFILIA_ROOM_V1"
 
 var in_session := false
 var is_host := false
@@ -35,8 +39,12 @@ var local_name := "Astronauta"
 var local_role := "collector"
 var local_appearance := "default"
 var local_port := DEFAULT_PORT
+var session_id := ""
+var discovery_udp: PacketPeerUDP
 
 func _ready() -> void:
+	# Continua respondendo à descoberta mesmo com o jogo pausado.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
@@ -70,6 +78,107 @@ func address_hint() -> String:
 		best = "127.0.0.1"
 	return "%s:%d" % [best, local_port]
 
+func is_discovery_active() -> bool:
+	return discovery_udp != null
+
+func _broadcast_targets() -> Array:
+	# Além do broadcast global, manda para o /24 de cada interface local.
+	var targets: Array = ["255.255.255.255", "127.0.0.1"]
+	for addr in IP.get_local_addresses():
+		var text := String(addr)
+		if text.contains(":") or text.begins_with("127.") or text.begins_with("169.254."):
+			continue
+		var parts := text.split(".")
+		if parts.size() == 4:
+			var subnet := "%s.%s.%s.255" % [parts[0], parts[1], parts[2]]
+			if not targets.has(subnet):
+				targets.append(subnet)
+	return targets
+
+func _start_discovery() -> void:
+	_stop_discovery()
+	var udp := PacketPeerUDP.new()
+	udp.set_broadcast_enabled(true)
+	if udp.bind(DISCOVERY_PORT) != OK:
+		push_warning("Net: porta de descoberta %d indisponível; use o IP manualmente." % DISCOVERY_PORT)
+		return
+	discovery_udp = udp
+
+func _stop_discovery() -> void:
+	if discovery_udp != null:
+		discovery_udp.close()
+	discovery_udp = null
+
+func _process(_delta: float) -> void:
+	if not is_host or discovery_udp == null:
+		return
+	while discovery_udp.get_available_packet_count() > 0:
+		var packet := discovery_udp.get_packet()
+		var source_ip := discovery_udp.get_packet_ip()
+		var source_port := discovery_udp.get_packet_port()
+		if packet.get_string_from_utf8() != DISCOVERY_PROBE:
+			continue
+		var reply := {
+			"magic": DISCOVERY_MAGIC,
+			"id": session_id,
+			"name": local_name,
+			"port": local_port,
+			"players": player_count(),
+			"max": MAX_PLAYERS,
+		}
+		discovery_udp.set_dest_address(source_ip, source_port)
+		discovery_udp.put_packet(JSON.stringify(reply).to_utf8_buffer())
+
+func discover_rooms(timeout: float = 2.5) -> Array:
+	# Procura salas na mesma rede. Retorna [{name, ip, port, players, max}].
+	var rooms: Array = []
+	if in_session or connecting:
+		return rooms
+	var udp := PacketPeerUDP.new()
+	udp.set_broadcast_enabled(true)
+	if udp.bind(0) != OK:
+		return rooms
+	var targets := _broadcast_targets()
+	var probe := DISCOVERY_PROBE.to_utf8_buffer()
+	var seen: Dictionary = {}
+	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
+	var next_probe := 0
+	while Time.get_ticks_msec() < deadline:
+		var now := Time.get_ticks_msec()
+		if now >= next_probe:
+			for target in targets:
+				udp.set_dest_address(String(target), DISCOVERY_PORT)
+				udp.put_packet(probe)
+			next_probe = now + 600
+		while udp.get_available_packet_count() > 0:
+			var text := udp.get_packet().get_string_from_utf8()
+			var source_ip := udp.get_packet_ip()
+			var data = JSON.parse_string(text)
+			if not (data is Dictionary) or String(data.get("magic", "")) != DISCOVERY_MAGIC:
+				continue
+			var port := int(data.get("port", DEFAULT_PORT))
+			var room_id := String(data.get("id", ""))
+			var key := room_id if room_id != "" else "%s:%d" % [source_ip, port]
+			if seen.has(key):
+				# A mesma sala pode responder por localhost e pelo IP da rede.
+				# Prefere o endereço de rede para funcionar em outros aparelhos.
+				var index := int(seen[key])
+				var current: Dictionary = rooms[index]
+				if String(current["ip"]).begins_with("127.") and not source_ip.begins_with("127."):
+					current["ip"] = source_ip
+				continue
+			seen[key] = rooms.size()
+			rooms.append({
+				"name": String(data.get("name", "Jogador")),
+				"ip": source_ip,
+				"port": port,
+				"players": int(data.get("players", 1)),
+				"max": int(data.get("max", MAX_PLAYERS)),
+			})
+		await get_tree().process_frame
+	udp.close()
+	return rooms
+
 # --- Criar/entrar/limpar ---
 func host(port: int, seed_value: int, p_name: String, p_role: String, p_appearance: String) -> Error:
 	leave()
@@ -83,11 +192,13 @@ func host(port: int, seed_value: int, p_name: String, p_role: String, p_appearan
 	connecting = false
 	world_seed = seed_value
 	local_port = port
+	session_id = "%d-%d" % [Time.get_ticks_usec(), randi()]
 	local_name = p_name.left(24)
 	local_role = p_role
 	local_appearance = p_appearance
 	peers.clear()
 	peers[1] = {"name": local_name, "role": local_role, "appearance": local_appearance}
+	_start_discovery()
 	return OK
 
 func join(ip: String, port: int, p_name: String, p_role: String, p_appearance: String) -> Error:
@@ -109,6 +220,8 @@ func join(ip: String, port: int, p_name: String, p_role: String, p_appearance: S
 
 func leave() -> void:
 	# Marca a saída antes de fechar para que server_disconnected seja ignorado.
+	_stop_discovery()
+	session_id = ""
 	in_session = false
 	is_host = false
 	connecting = false

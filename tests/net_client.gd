@@ -37,6 +37,14 @@ func run_checks() -> void:
 				flags["snake_ok"] = true
 	)
 
+	# Descoberta automática na mesma rede, sem digitar o IP.
+	var rooms: Array = await net.discover_rooms(2.0)
+	var found_host := false
+	for room in rooms:
+		if int(room.get("port", 0)) == PORT and String(room.get("name", "")) == "Host":
+			found_host = true
+	check(found_host, "cliente encontra a sala do host pela rede Wi-Fi")
+
 	var err: Error = net.join("127.0.0.1", PORT, "Client", "biologist", "blue")
 	check(err == OK, "cliente inicia a conexão ENet")
 

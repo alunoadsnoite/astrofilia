@@ -21,6 +21,8 @@ extends Control
 @onready var online_port_edit: LineEdit = $OnlinePanel/OnlineVBox/OnlineAddressBox/OnlinePortEdit
 @onready var online_role_label: Label = $OnlinePanel/OnlineVBox/OnlineRoleLabel
 @onready var online_role_option: OptionButton = $OnlinePanel/OnlineVBox/OnlineRoleOption
+@onready var online_scan_button: Button = $OnlinePanel/OnlineVBox/OnlineScanButton
+@onready var online_rooms_option: OptionButton = $OnlinePanel/OnlineVBox/OnlineRoomsOption
 @onready var online_hint: Label = $OnlinePanel/OnlineVBox/OnlineHint
 @onready var online_host_button: Button = $OnlinePanel/OnlineVBox/OnlineHostButton
 @onready var online_join_button: Button = $OnlinePanel/OnlineVBox/OnlineJoinButton
@@ -43,6 +45,8 @@ var selected_slot_index: int = -1
 var choosing_new_slot := false
 var overwrite_dialog: ConfirmationDialog
 var connect_token: int = 0
+var scan_token: int = 0
+var discovered_rooms: Array = []
 
 func _ready() -> void:
 	GameManager.load_game()
@@ -65,6 +69,8 @@ func _ready() -> void:
 	online_host_button.pressed.connect(_on_online_host_pressed)
 	online_join_button.pressed.connect(_on_online_join_pressed)
 	online_back_button.pressed.connect(_on_online_back_pressed)
+	online_scan_button.pressed.connect(_on_online_scan_pressed)
+	online_rooms_option.item_selected.connect(_on_online_room_selected)
 	Net.join_ok.connect(_on_net_join_ok)
 	Net.join_failed.connect(_on_net_join_failed)
 	Net.session_ended.connect(_on_net_session_ended)
@@ -94,6 +100,7 @@ func _refresh_texts() -> void:
 	online_name_label.text = GameManager.t("online_name")
 	online_address_label.text = GameManager.t("online_ip") + " / " + GameManager.t("online_port")
 	online_role_label.text = GameManager.t("online_role")
+	online_scan_button.text = GameManager.t("online_scan")
 	online_host_button.text = GameManager.t("online_host")
 	online_join_button.text = GameManager.t("online_join")
 	online_hint.text = GameManager.t("online_hint")
@@ -179,6 +186,10 @@ func _on_online_pressed() -> void:
 	achievements_panel.visible = false
 	online_panel.visible = true
 	online_status.text = ""
+	scan_token += 1
+	discovered_rooms.clear()
+	online_rooms_option.clear()
+	online_rooms_option.visible = false
 	online_name_edit.text = GameManager.player_name
 	_setup_online_roles()
 	online_ip_edit.text = "127.0.0.1" if online_ip_edit.text.strip_edges() == "" else online_ip_edit.text
@@ -191,6 +202,58 @@ func _setup_online_roles() -> void:
 	online_role_option.add_item("Coletor", 0)
 	online_role_option.add_item("Biólogo", 1)
 	online_role_option.selected = 0 if GameManager.role == "collector" else 1
+
+func _on_online_scan_pressed() -> void:
+	if Net.in_session or Net.connecting:
+		return
+	if not _read_online_fields():
+		return
+	scan_token += 1
+	var token := scan_token
+	_set_online_busy(true)
+	online_rooms_option.visible = false
+	online_status.text = GameManager.t("online_scanning")
+	var rooms: Array = await Net.discover_rooms(2.5)
+	if token != scan_token or not online_panel.visible:
+		return
+	_set_online_busy(false)
+	discovered_rooms = rooms
+	if rooms.is_empty():
+		online_status.text = GameManager.t("online_no_rooms")
+		return
+	online_rooms_option.clear()
+	for room in rooms:
+		var label := "%s • %s:%d • %d/%d" % [
+			String(room["name"]), String(room["ip"]), int(room["port"]),
+			int(room["players"]), int(room["max"]),
+		]
+		online_rooms_option.add_item(label)
+	online_rooms_option.selected = 0
+	online_rooms_option.visible = true
+	_apply_discovered_room(0)
+	if rooms.size() == 1:
+		online_status.text = GameManager.t("online_found") % String(rooms[0]["name"])
+		await get_tree().create_timer(0.4).timeout
+		if token != scan_token or not online_panel.visible:
+			return
+		if Net.connecting or Net.in_session:
+			return
+		_on_online_join_pressed()
+	else:
+		online_status.text = GameManager.t("online_rooms_hint")
+
+func _apply_discovered_room(index: int) -> void:
+	if index < 0 or index >= discovered_rooms.size():
+		return
+	var room: Dictionary = discovered_rooms[index]
+	online_ip_edit.text = String(room["ip"])
+	online_port_edit.text = str(int(room["port"]))
+
+func _on_online_room_selected(index: int) -> void:
+	_apply_discovered_room(index)
+	if index >= 0 and index < discovered_rooms.size():
+		var room: Dictionary = discovered_rooms[index]
+		online_status.text = GameManager.t("online_found") % String(room["name"])
 
 func _read_online_fields() -> bool:
 	var name := online_name_edit.text.strip_edges()
@@ -208,6 +271,8 @@ func _read_online_fields() -> bool:
 func _set_online_busy(busy: bool) -> void:
 	online_host_button.disabled = busy
 	online_join_button.disabled = busy
+	online_scan_button.disabled = busy
+	online_rooms_option.disabled = busy
 	online_back_button.disabled = false
 	online_name_edit.editable = not busy
 	online_ip_edit.editable = not busy
@@ -215,6 +280,7 @@ func _set_online_busy(busy: bool) -> void:
 	online_role_option.disabled = busy
 
 func _on_online_host_pressed() -> void:
+	scan_token += 1
 	if not _read_online_fields():
 		return
 	var port := int(online_port_edit.text.strip_edges())
@@ -229,6 +295,7 @@ func _on_online_host_pressed() -> void:
 	_enter_online_game()
 
 func _on_online_join_pressed() -> void:
+	scan_token += 1
 	if not _read_online_fields():
 		return
 	var ip := online_ip_edit.text.strip_edges()
@@ -284,6 +351,10 @@ func _enter_online_game() -> void:
 
 func _on_online_back_pressed() -> void:
 	connect_token += 1
+	scan_token += 1
+	discovered_rooms.clear()
+	online_rooms_option.clear()
+	online_rooms_option.visible = false
 	if Net.in_session or Net.connecting:
 		Net.cancel_connect()
 	_set_online_busy(false)

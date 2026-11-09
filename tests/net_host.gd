@@ -42,6 +42,7 @@ func run_checks() -> void:
 	check(err == OK, "host abre a sala ENet")
 	check(net.in_session and net.is_host, "host fica em sessão como autoridade")
 	check(net.address_hint() != "", "host informa um endereço para compartilhar")
+	check(net.is_discovery_active(), "host anuncia a sala na rede Wi-Fi")
 
 	var deadline := Time.get_ticks_msec() + 15000
 	while net.player_count() < 2 and Time.get_ticks_msec() < deadline:

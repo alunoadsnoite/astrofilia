@@ -2,13 +2,13 @@
 
 Jogo de aventura e sobrevivência espacial em **3D**, feito com **Godot 4.7** e exportável para **Android**.
 
-**Versão do código: 0.4.0** — multiplayer online por IP (host e cliente), interior da nave como cenário separado, cobras noturnas, joystick analógico de 360° e otimização para Android.
+**Versão do código: 0.4.1** — multiplayer online por IP com **descoberta automática na mesma rede Wi‑Fi**, interior da nave como cenário separado, cobras noturnas, joystick analógico de 360° e otimização para Android.
 
 APK mais recente:
 
-[![Release](https://img.shields.io/badge/release-v0.4.0-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.4.0)
+[![Release](https://img.shields.io/badge/release-v0.4.1-brightgreen)](https://github.com/alunoadsnoite/astrofilia/releases/tag/v0.4.1)
 
-[⬇️ Baixar Astrofilia.apk (v0.4.0)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.4.0/Astrofilia.apk)
+[⬇️ Baixar Astrofilia.apk (v0.4.1)](https://github.com/alunoadsnoite/astrofilia/releases/download/v0.4.1/Astrofilia.apk)
 
 ## 📖 História
 
@@ -24,7 +24,7 @@ Um astronauta pousa em um planeta desconhecido. O capítulo 1 é um tutorial em 
 
 - **Singleplayer**: você é Coletor e Biólogo ao mesmo tempo.
 - **Multijogador local**: escolha sua função (Coletor ou Biólogo) no mesmo dispositivo.
-- **Multijogador online por IP**: até 4 jogadores em rede, com host e clientes (veja a seção abaixo).
+- **Multijogador online por IP**: até 4 jogadores em rede, com host e clientes e **busca automática de salas no Wi‑Fi** (veja a seção abaixo).
 
 ## 🌐 Multiplayer online por IP
 
@@ -42,15 +42,22 @@ O host é a autoridade da sessão e compartilha o mundo com os convidados:
 
 1. No menu, abra **Jogar → Jogar online (IP)**.
 2. Informe seu nome, escolha a função e toque em **Criar sala (host)**.
-3. Compartilhe seu IP e a porta (padrão **7911/UDP**) com os outros jogadores.
+3. Pronto: a sala já aparece sozinha para quem estiver no mesmo Wi‑Fi. Se quiser jogar por outra rede, compartilhe o IP e a porta (padrão **7911/UDP**).
 
-**Como entrar**
+**Como entrar no mesmo Wi‑Fi (jeito fácil)**
+
+1. Confira se os dois aparelhos estão na **mesma rede Wi‑Fi**.
+2. Abra **Jogar → Jogar online (IP)**.
+3. Informe seu nome, escolha a função e toque em **Procurar salas no Wi‑Fi**.
+4. Se houver uma sala, o jogo conecta sozinho. Se houver várias, escolha na lista e toque em **Entrar na sala**.
+
+**Como entrar digitando o IP (alternativa)**
 
 1. Abra **Jogar → Jogar online (IP)**.
 2. Informe o nome, a função, o **IP do host** e a porta.
 3. Toque em **Entrar na sala**. A conexão tem tempo limite de 8 segundos.
 
-Na mesma rede, use o IP local do host (por exemplo `192.168.0.10`). Pela internet, o host precisa liberar/encaminhar a porta UDP no roteador. Não há matchmaking nem travessia de NAT: a conexão é direta por IP. Todos devem usar a mesma versão do jogo.
+A busca usa **UDP broadcast na porta 7912** e só funciona na mesma rede local. O host responde mesmo com o jogo pausado. Se dois hosts abrirem salas na mesma rede, o primeiro fica com a porta de descoberta; o segundo continua jogável pelo IP manual. Pela internet, o host precisa liberar/encaminhar as portas UDP 7911 e 7912 no roteador. Não há matchmaking nem travessia de NAT: a conexão é direta por IP. Todos devem usar a mesma versão do jogo.
 
 **Limitações da v1 online**
 
@@ -97,7 +104,7 @@ Na mesma rede, use o IP local do host (por exemplo `192.168.0.10`). Pela interne
 - Conquistas (incluindo **Voltou para casa**) e salvamento automático
 - Controles por teclado e touch: **joystick analógico de 360°** com velocidade proporcional à inclinação, além dos botões de pular e ação
 - **Otimização para Android**: sombras de cenário desligadas, menos props, partículas e estrelas, terreno com menos subdivisões e escala 3D reduzida — sem mudar o visual no desktop
-- **Multiplayer online por IP (ENet)**: host autoritativo, até 4 jogadores, seed compartilhada, avatares com nome, itens e cobras sincronizados
+- **Multiplayer online por IP (ENet)**: host autoritativo, até 4 jogadores, seed compartilhada, avatares com nome, itens e cobras sincronizados e **descoberta automática de salas no Wi‑Fi**
 - Menu com 2 slots de save, idioma (PT/EN/ES), aparência, volumes e modo de jogo
 - Salvamento avançado com JSON (placeholders, progresso e cooldown de itens)
 - Ícone do aplicativo: foguete com o nome **Astrofilia**
@@ -212,9 +219,11 @@ Os testes sobem dois processos Godot headless em localhost e validam o ENet de v
 ```bash
 ./tests/net_session.sh
 ./tests/net_gameplay.sh
+./tests/net_menu.sh
+XDG_DATA_HOME=/tmp/astrofilia-menu-online godot --headless --path . --log-file /tmp/astrofilia-menu-online.log --script tests/menu_online.gd
 ```
 
-O primeiro cobre os RPCs do autoload `Net`; o segundo roda `Gameplay.tscn` dos dois lados e valida avatares remotos, nomes, posição e coleta compartilhada de itens.
+O primeiro cobre os RPCs do autoload `Net` e a descoberta; o segundo roda `Gameplay.tscn` dos dois lados e valida avatares remotos, nomes, posição e coleta compartilhada de itens; o terceiro valida o botão **Procurar salas no Wi‑Fi** conectando sozinho; o último confere o painel online, os campos e o layout.
 
 ## Salvamento e aparência
 

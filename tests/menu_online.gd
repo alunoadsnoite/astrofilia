@@ -31,6 +31,13 @@ func run_checks() -> void:
 	var port: String = menu.online_port_edit.text
 	check(ip != "" and port == "7911", "IP e porta padrão preenchidos")
 	check(menu.online_role_option.item_count == 2, "funções Coletor e Biólogo disponíveis")
+	check(menu.online_scan_button != null and menu.online_scan_button.text != "", "menu tem o botão de procurar salas")
+	check(menu.online_rooms_option != null and not menu.online_rooms_option.visible, "lista de salas começa oculta")
+	menu.online_rooms_option.visible = true
+	await process_frame
+	var box: VBoxContainer = menu.get_node("OnlinePanel/OnlineVBox")
+	check(box.get_combined_minimum_size().y <= menu.online_panel.size.y - 32.0, "painel online cabe no espaço disponível")
+	menu.online_rooms_option.visible = false
 
 	menu.online_name_edit.text = "  "
 	check(menu._read_online_fields(), "nome vazio é aceito com padrão")

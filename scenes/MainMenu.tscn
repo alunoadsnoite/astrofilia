@@ -282,9 +282,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -300.0
-offset_top = -280.0
+offset_top = -300.0
 offset_right = 300.0
-offset_bottom = 280.0
+offset_bottom = 300.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -299,7 +299,7 @@ offset_right = -16.0
 offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 6
 
 [node name="OnlineTitle" type="Label" parent="OnlinePanel/OnlineVBox"]
 layout_mode = 2
@@ -342,6 +342,15 @@ layout_mode = 2
 text = "Sua função"
 
 [node name="OnlineRoleOption" type="OptionButton" parent="OnlinePanel/OnlineVBox"]
+layout_mode = 2
+
+[node name="OnlineScanButton" type="Button" parent="OnlinePanel/OnlineVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Procurar salas no Wi-Fi"
+
+[node name="OnlineRoomsOption" type="OptionButton" parent="OnlinePanel/OnlineVBox"]
+visible = false
 layout_mode = 2
 
 [node name="OnlineHint" type="Label" parent="OnlinePanel/OnlineVBox"]
